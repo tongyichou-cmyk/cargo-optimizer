@@ -1327,12 +1327,12 @@ const MAX_RECORDS = 30;
 const FIELD_KEYWORDS = {
   vendor:   ['vendor','客戶','廠商','供應商'],
   article:  ['article','料號','編號','part','model','item no','item#'],
-  name:     ['品項','名稱','貨名','item','name','description','品名'],
+  name:     ['model name','品項','名稱','貨名','item','name','description','品名'],
   l:        ['長','長度','length','len'],
   w:        ['寬','寬度','width','wid'],
   h:        ['高','高度','height','hei'],
-  wt:       ['重','重量','weight','wt','kg'],
-  qty:      ['數','數量','qty','quantity','count','order','件數','箱數'],
+  wt:       ['kg/ctn','重','重量','weight','wt','kg'],
+  qty:      ['order ctn','order carton','箱數','ctn','件數','數量','qty','quantity'],
   dir:      ['方向','direction','dir'],
   stack:    ['堆壓','stack'],
   maxStack: ['堆層','層數','maxstack'],
@@ -1451,17 +1451,48 @@ function processParsedData(data) {
     return;
   }
 
-  // Find header row (first non-empty row)
+  // Find best header row by scoring keyword matches across first 10 rows
+  const allKeywords = Object.values(FIELD_KEYWORDS).flat().map(k => k.toLowerCase());
   let headerRowIdx = 0;
-  for (let i = 0; i < Math.min(5, data.length); i++) {
-    if (data[i].some(c => c !== '' && c !== null && c !== undefined)) {
-      headerRowIdx = i;
-      break;
+  let bestScore = -1;
+  for (let i = 0; i < Math.min(10, data.length); i++) {
+    const row = data[i];
+    let score = 0;
+    row.forEach(cell => {
+      const cl = String(cell || '').toLowerCase().trim();
+      if (cl && allKeywords.some(kw => cl.includes(kw))) score++;
+    });
+    if (score > bestScore) { bestScore = score; headerRowIdx = i; }
+  }
+
+  // Build headers, merging next row's non-empty cells (handles split headers like 長/寬/高)
+  const headers = data[headerRowIdx].map(h => String(h || '').trim());
+  const nextRow = data[headerRowIdx + 1] || [];
+  nextRow.forEach((cell, idx) => {
+    const sub = String(cell || '').trim();
+    if (sub && !headers[idx]) headers[idx] = sub;
+  });
+
+  // Detect if next row is a sub-header row (has keyword matches but mostly empty)
+  let subHeaderRowIdx = -1;
+  if (nextRow.length) {
+    let subScore = 0;
+    nextRow.forEach(cell => {
+      const cl = String(cell || '').toLowerCase().trim();
+      if (cl && allKeywords.some(kw => cl.includes(kw))) subScore++;
+    });
+    const nonEmpty = nextRow.filter(c => c !== '' && c !== null && c !== undefined).length;
+    if (subScore >= 1 && nonEmpty <= headers.filter(h => h).length * 0.6) {
+      subHeaderRowIdx = headerRowIdx + 1;
     }
   }
 
-  const headers = data[headerRowIdx].map(h => String(h || '').trim());
-  const rows = data.slice(headerRowIdx + 1).filter(r => r.some(c => c !== '' && c !== null && c !== undefined));
+  const dataStartRow = subHeaderRowIdx >= 0 ? subHeaderRowIdx + 1 : headerRowIdx + 1;
+  const rows = data.slice(dataStartRow).filter(r => {
+    // Filter completely empty rows and totals rows (no vendor AND no article)
+    if (!r.some(c => c !== '' && c !== null && c !== undefined)) return false;
+    return true;
+  });
 
   // Fuzzy match headers
   const mapping = {};
