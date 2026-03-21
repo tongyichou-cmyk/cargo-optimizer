@@ -1803,7 +1803,7 @@ function packEPRange(boxes, placedAll, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW
           if (below.some(b => b.stack === 'no')) continue;
           if (below.some(b => b.stack === 'yes' && b.maxStack !== undefined)) {
             const maxH = Math.max(...below.filter(b => b.stack === 'yes').map(b => b.maxStack || 99));
-            if (getStackHeight(allPlaced, x, z, bl, bw) >= maxH) continue;
+            if (getStackHeight(allPlaced, x, z, bl, bw, box) >= maxH) continue;
           }
         }
 
@@ -1875,7 +1875,7 @@ function packEP(itemList, contSpec, contKey) {
     vendorBoxes[v].sort((a, b) => {
       const qa = skuQty[a.origId] || 0, qb = skuQty[b.origId] || 0;
       if (qb !== qa) return qb - qa;
-      if (b.wt !== a.wt) return b.wt - a.wt;
+      if (b.h !== a.h) return b.h - a.h;
       return (b.l*b.w*b.h) - (a.l*a.w*a.h);
     });
   });
@@ -2012,15 +2012,13 @@ function getBoxesBelow(placed, x, y, z, l, w) {
   });
 }
 
-function getStackHeight(placed, x, z, l, w) {
-  const eps = 0.1;
-  let count = 0;
-  const col = placed.filter(b => {
+function getStackHeight(placed, x, z, l, w, box) {
+  return placed.filter(b => {
+    if (box !== undefined && b.origId !== box.origId) return false;
     const ox = Math.min(x + l, b.px + b.pl) - Math.max(x, b.px);
     const oz = Math.min(z + w, b.pz + b.pw) - Math.max(z, b.pz);
     return ox > 0.1 && oz > 0.1;
-  });
-  return col.length;
+  }).length;
 }
 
 // ===================== RENDER VIEWS =====================

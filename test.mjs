@@ -83,8 +83,9 @@ function getBoxesBelow(placed, x, y, z, l, w) {
   });
 }
 
-function getStackHeight(placed, x, z, l, w) {
+function getStackHeight(placed, x, z, l, w, box) {
   return placed.filter(b => {
+    if (box !== undefined && b.origId !== box.origId) return false;
     const ox = Math.min(x+l, b.px+b.pl) - Math.max(x, b.px);
     const oz = Math.min(z+w, b.pz+b.pw) - Math.max(z, b.pz);
     return ox > 0.1 && oz > 0.1;
@@ -121,7 +122,7 @@ function packEPRange(boxes, placedAll, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW
           if (below.some(b => b.stack === 'no')) continue;
           if (below.some(b => b.stack === 'yes' && b.maxStack !== undefined)) {
             const maxH = Math.max(...below.filter(b => b.stack === 'yes').map(b => b.maxStack || 99));
-            if (getStackHeight(all, x, z, bl, bw) >= maxH) continue;
+            if (getStackHeight(all, x, z, bl, bw, box) >= maxH) continue;
           }
         }
         const score = x * 1e10 + y * 1e5 + z;
@@ -165,7 +166,7 @@ function packEP(itemList, contSpec) {
     vendorBoxes[v].sort((a, b) => {
       const qa = skuQty[a.origId]||0, qb = skuQty[b.origId]||0;
       if (qb !== qa) return qb - qa;
-      if (b.wt !== a.wt) return b.wt - a.wt;
+      if (b.h !== a.h) return b.h - a.h;
       return (b.l*b.w*b.h) - (a.l*a.w*a.h);
     });
   });
@@ -566,7 +567,7 @@ test('real data: all 729 cartons placed (or ≥97%)', () => {
   const total = realResult.placed.length + realResult.unplaced.length;
   assert.equal(total, 729, 'total should be 729');
   const rate = realResult.placed.length / 729;
-  assert.ok(rate >= 0.95, `placed rate ${(rate*100).toFixed(1)}% below 95% threshold`);
+  assert.ok(rate >= 0.97, `placed rate ${(rate*100).toFixed(1)}% below 97% threshold`);
   console.log(`     → placed ${realResult.placed.length}/729 (${(rate*100).toFixed(1)}%)  vol=${( realResult.volRate*100).toFixed(1)}%`);
 });
 
