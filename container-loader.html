@@ -1,0 +1,2780 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cargo Optimizer v1.4 — TOA DR Enterprise</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root {
+    --bg: #F5F5F7;
+    --surface: #FFFFFF;
+    --surface2: #F2F2F7;
+    --border: #E0E0E5;
+    --border-light: #EBEBEF;
+    --accent: #007AFF;
+    --accent-hover: #0066DD;
+    --text: #1D1D1F;
+    --text2: #3A3A3C;
+    --text3: #6E6E73;
+    --text4: #AEAEB2;
+    --danger: #FF3B30;
+    --success: #34C759;
+    --warn: #FF9500;
+    --radius: 10px;
+    --radius-sm: 6px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    font-size: 13px;
+  }
+
+  /* HEADER */
+  .app-header {
+    height: 52px;
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    gap: 16px;
+  }
+
+  .header-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  .logo-icon {
+    font-size: 22px;
+    line-height: 1;
+  }
+
+  .logo-text {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.2px;
+    white-space: nowrap;
+  }
+
+  .shipment-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .shipment-label {
+    font-size: 12px;
+    color: var(--text3);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  #shipmentId {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    padding: 5px 14px;
+    border: 1.5px solid var(--border);
+    border-radius: 20px;
+    background: var(--surface2);
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    width: 220px;
+  }
+
+  #shipmentId:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0,122,255,0.12);
+    background: #fff;
+  }
+
+  .version-badge {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--text3);
+    font-family: 'IBM Plex Mono', monospace;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 10px;
+    white-space: nowrap;
+  }
+
+  /* MAIN LAYOUT */
+  .app-body {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    overflow: hidden;
+  }
+
+  /* LEFT PANEL */
+  .left-panel {
+    background: var(--bg);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .left-panel::-webkit-scrollbar { width: 4px; }
+  .left-panel::-webkit-scrollbar-track { background: transparent; }
+  .left-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .section {
+    background: var(--surface);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+
+  .section-header {
+    padding: 10px 14px 8px;
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .section-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text2);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+
+  .section-body {
+    padding: 12px 14px;
+  }
+
+  /* UPLOAD */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius-sm);
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: var(--surface2);
+  }
+
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(0,122,255,0.04);
+  }
+
+  .drop-icon { font-size: 28px; margin-bottom: 6px; }
+  .drop-text { font-size: 12px; color: var(--text3); line-height: 1.5; }
+  .drop-text strong { color: var(--accent); }
+
+  #fileInput { display: none; }
+
+  .file-info {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: rgba(52,199,89,0.08);
+    border: 1px solid rgba(52,199,89,0.25);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--text2);
+  }
+
+  .file-info.show { display: flex; }
+  .file-info-icon { font-size: 16px; }
+
+  .btn-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .btn-primary:hover { background: var(--accent-hover); }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--accent);
+    border: 1.5px solid var(--accent);
+  }
+
+  .btn-ghost:hover { background: rgba(0,122,255,0.06); }
+
+  .btn-danger {
+    background: transparent;
+    color: var(--danger);
+    border: 1.5px solid var(--danger);
+  }
+
+  .btn-danger:hover { background: rgba(255,59,48,0.06); }
+
+  .btn-sm { padding: 4px 10px; font-size: 11px; }
+
+  .btn-calc {
+    width: calc(100% - 24px);
+    margin: 4px 12px 12px;
+    padding: 13px 0;
+    font-size: 15px;
+    font-weight: 600;
+    border-radius: var(--radius);
+    background: linear-gradient(135deg, #007AFF 0%, #5856D6 100%);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 4px 14px rgba(0,122,255,0.35);
+  }
+
+  .btn-calc:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(0,122,255,0.4);
+  }
+
+  .btn-calc:active { transform: translateY(0); }
+
+  /* CONTAINER SELECTOR */
+  .ctab-row {
+    display: flex;
+    gap: 4px;
+    padding: 2px;
+    background: var(--surface2);
+    border-radius: var(--radius-sm);
+    margin-bottom: 10px;
+  }
+
+  .ctab {
+    flex: 1;
+    padding: 6px 4px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: var(--text3);
+    background: transparent;
+    border: none;
+    font-family: inherit;
+  }
+
+  .ctab.active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.10);
+  }
+
+  .cont-info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .cont-info-item {
+    background: var(--surface2);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+  }
+
+  .cont-info-label {
+    font-size: 10px;
+    color: var(--text3);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    margin-bottom: 2px;
+  }
+
+  .cont-info-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+  }
+
+  /* HISTORY */
+  .history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+  }
+
+  .history-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.15s;
+    border: 1px solid transparent;
+  }
+
+  .history-item:hover {
+    background: var(--surface2);
+    border-color: var(--border);
+  }
+
+  .history-item-left { flex: 1; min-width: 0; }
+  .history-shipment { font-size: 12px; font-weight: 600; color: var(--text); font-family: 'IBM Plex Mono', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .history-meta { font-size: 10px; color: var(--text3); margin-top: 1px; }
+  .history-rate { font-size: 12px; font-weight: 600; color: var(--accent); margin-left: 8px; }
+
+  .history-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .history-empty { font-size: 12px; color: var(--text4); text-align: center; padding: 8px 0; }
+
+  /* ITEMS LIST */
+  .items-list {
+    max-height: 220px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .items-list::-webkit-scrollbar { width: 4px; }
+  .items-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .item-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+
+  .item-card-head {
+    display: flex;
+    align-items: center;
+    padding: 6px 8px;
+    background: var(--surface2);
+    gap: 6px;
+  }
+
+  .vendor-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 4px;
+    color: #fff;
+    flex-shrink: 0;
+  }
+
+  .item-article {
+    font-size: 11px;
+    font-family: 'IBM Plex Mono', monospace;
+    color: var(--text2);
+    flex-shrink: 0;
+  }
+
+  .item-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .qty-badge {
+    background: var(--accent);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 10px;
+    flex-shrink: 0;
+  }
+
+  .item-del {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text4);
+    font-size: 15px;
+    padding: 0 2px;
+    line-height: 1;
+    transition: color 0.15s;
+    flex-shrink: 0;
+  }
+
+  .item-del:hover { color: var(--danger); }
+
+  .item-card-body {
+    padding: 5px 8px 6px;
+    font-size: 11px;
+    color: var(--text3);
+    line-height: 1.6;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .items-empty { font-size: 12px; color: var(--text4); text-align: center; padding: 20px 0; }
+
+  /* ADD FORM */
+  .form-grid {
+    display: grid;
+    gap: 8px;
+  }
+
+  .form-row {
+    display: grid;
+    gap: 6px;
+  }
+
+  .form-row.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .form-row.cols-2 { grid-template-columns: 1fr 1fr; }
+
+  .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .form-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  .form-input, .form-select {
+    padding: 6px 9px;
+    border: 1.5px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-family: inherit;
+    color: var(--text);
+    background: var(--surface);
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    width: 100%;
+  }
+
+  .form-input:focus, .form-select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(0,122,255,0.10);
+  }
+
+  .form-input.mono { font-family: 'IBM Plex Mono', monospace; }
+
+  /* RIGHT PANEL */
+  .right-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  /* TAB BAR */
+  .tab-bar {
+    display: flex;
+    align-items: center;
+    padding: 8px 16px 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    gap: 2px;
+    flex-shrink: 0;
+  }
+
+  .tab {
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text3);
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    transition: all 0.15s;
+    font-family: inherit;
+    border-radius: 6px 6px 0 0;
+    white-space: nowrap;
+  }
+
+  .tab:hover { color: var(--text); background: var(--surface2); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: transparent; }
+
+  .tab-spacer { flex: 1; }
+
+  .tab-extra {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 8px;
+  }
+
+  .btn-3d-toggle {
+    display: none;
+    padding: 5px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--text2);
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+  }
+
+  .btn-3d-toggle.visible { display: flex; align-items: center; gap: 4px; }
+  .btn-3d-toggle:hover { background: var(--surface2); }
+
+  /* VIEW PANELS */
+  .view-panel {
+    display: none;
+    flex: 1;
+    overflow: hidden;
+    flex-direction: column;
+  }
+
+  .view-panel.active { display: flex; }
+
+  .canvas-scroll {
+    flex: 1;
+    overflow: auto;
+    padding: 16px;
+    background: var(--bg);
+  }
+
+  .canvas-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+  .canvas-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  canvas {
+    display: block;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+  }
+
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--text4);
+    gap: 10px;
+  }
+
+  .empty-icon { font-size: 48px; }
+  .empty-title { font-size: 16px; font-weight: 600; color: var(--text3); }
+  .empty-sub { font-size: 13px; }
+
+  /* REPORT */
+  .report-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  .report-scroll::-webkit-scrollbar { width: 6px; }
+  .report-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    box-shadow: var(--shadow);
+  }
+
+  .stat-label { font-size: 11px; color: var(--text3); font-weight: 500; margin-bottom: 4px; }
+  .stat-value { font-size: 24px; font-weight: 700; color: var(--text); font-family: 'IBM Plex Mono', monospace; }
+  .stat-unit { font-size: 13px; color: var(--text3); font-weight: 400; }
+
+  .progress-bar-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow);
+  }
+
+  .progress-label-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text2);
+  }
+
+  .progress-track {
+    background: var(--surface2);
+    border-radius: 4px;
+    height: 8px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--accent), #5856D6);
+    transition: width 0.6s ease;
+  }
+
+  .report-table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow);
+  }
+
+  .report-table-title {
+    padding: 12px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text2);
+    border-bottom: 1px solid var(--border-light);
+    background: var(--surface2);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  th {
+    text-align: left;
+    padding: 9px 12px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--text3);
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border-light);
+    color: var(--text);
+  }
+
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface2); }
+
+  .status-ok { color: var(--success); font-weight: 600; }
+  .status-partial { color: var(--warn); font-weight: 600; }
+  .status-fail { color: var(--danger); font-weight: 600; }
+
+  .cont-info-footer {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    font-size: 12px;
+    color: var(--text3);
+    box-shadow: var(--shadow);
+  }
+
+  /* 3D VIEW */
+  .view-3d-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    background: #1a1a2e;
+  }
+
+  #c3d {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .hint-3d {
+    position: absolute;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.5);
+    color: #fff;
+    font-size: 11px;
+    padding: 5px 14px;
+    border-radius: 20px;
+    pointer-events: none;
+    backdrop-filter: blur(8px);
+  }
+
+  .empty-3d {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,0.4);
+    gap: 10px;
+  }
+
+  .empty-3d-icon { font-size: 48px; }
+  .empty-3d-text { font-size: 14px; }
+
+  .perf-warn {
+    display: none;
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: rgba(255,149,0,0.9);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 6px;
+  }
+
+  .perf-warn.show { display: block; }
+
+  /* MODALS */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    backdrop-filter: blur(4px);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal-overlay.show { display: flex; }
+
+  .modal {
+    background: var(--surface);
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+    width: 90%;
+    max-width: 480px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: modalIn 0.22s ease;
+  }
+
+  .modal-lg { max-width: 600px; }
+
+  @keyframes modalIn {
+    from { opacity: 0; transform: scale(0.95) translateY(8px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+
+  .modal-header {
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--border-light);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .modal-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .modal-subtitle {
+    font-size: 12px;
+    color: var(--text3);
+    margin-top: 2px;
+  }
+
+  .modal-body {
+    padding: 16px 20px;
+    overflow-y: auto;
+    flex: 1;
+  }
+
+  .modal-body::-webkit-scrollbar { width: 4px; }
+  .modal-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .modal-footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border-light);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .sheet-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .sheet-item {
+    padding: 10px 14px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    border: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--text);
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sheet-item:hover { background: rgba(0,122,255,0.06); border-color: var(--accent); color: var(--accent); }
+
+  .col-map-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .col-map-table th {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text3);
+    padding: 6px 8px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .col-map-table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border-light);
+    font-size: 12px;
+  }
+
+  .col-map-table tr:last-child td { border-bottom: none; }
+
+  .req-star { color: var(--danger); font-size: 10px; }
+
+  .hints-content { font-size: 13px; line-height: 1.7; color: var(--text2); }
+  .hints-content ul { padding-left: 18px; margin-top: 8px; }
+  .hints-content li { margin-bottom: 4px; }
+  .hints-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+  .hints-warn { color: var(--danger); }
+  .hints-ok { color: var(--success); }
+
+  /* LOADING OVERLAY */
+  .loading-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(8px);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .loading-overlay.show { display: flex; }
+
+  .loading-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .loading-msg {
+    font-size: 14px;
+    color: var(--text2);
+    font-weight: 500;
+  }
+
+  /* Misc */
+  .divider {
+    height: 1px;
+    background: var(--border-light);
+    margin: 4px 0;
+  }
+
+  .tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-right: 2px;
+  }
+
+  .tag-up { background: rgba(0,122,255,0.12); color: var(--accent); }
+  .tag-fixed { background: rgba(255,59,48,0.12); color: var(--danger); }
+  .tag-free { background: rgba(52,199,89,0.12); color: var(--success); }
+  .tag-stack-yes { background: rgba(52,199,89,0.12); color: var(--success); }
+  .tag-stack-no { background: rgba(255,59,48,0.12); color: var(--danger); }
+
+  #maxStackRow { display: none; }
+
+  .report-hidden { display: none; }
+
+  @media (max-width: 900px) {
+    .app-body { grid-template-columns: 1fr; }
+    .left-panel { display: none; }
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="app-header">
+  <div class="header-logo">
+    <span class="logo-icon">📦</span>
+    <span class="logo-text">Cargo Optimizer</span>
+  </div>
+  <div class="shipment-wrap">
+    <span class="shipment-label">出貨代號</span>
+    <input type="text" id="shipmentId" placeholder="例：SH20260321" autocomplete="off" spellcheck="false">
+  </div>
+  <span class="version-badge">TOA DR Enterprise · v1.4</span>
+</header>
+
+<!-- MAIN BODY -->
+<div class="app-body">
+
+  <!-- LEFT PANEL -->
+  <div class="left-panel">
+
+    <!-- 1. UPLOAD -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">📁 匯入檔案</span>
+      </div>
+      <div class="section-body">
+        <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+          <div class="drop-icon">📂</div>
+          <div class="drop-text">
+            <strong>點擊選擇</strong>或拖曳檔案至此<br>
+            支援 .xlsx · .xls · .csv
+          </div>
+        </div>
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" onchange="handleFile(this)">
+        <div class="file-info" id="fileInfo">
+          <span class="file-info-icon">✅</span>
+          <span id="fileInfoText"></span>
+          <button class="btn btn-sm btn-danger" onclick="clearFile()" style="margin-left:auto">✕ 清除</button>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-ghost btn-sm" onclick="downloadTemplate()">⬇ 下載範本</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. CONTAINER SELECTOR -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">🚢 貨櫃規格</span>
+      </div>
+      <div class="section-body">
+        <div class="ctab-row">
+          <button class="ctab" onclick="selCont('20ft', this)">20呎</button>
+          <button class="ctab" onclick="selCont('40ft', this)">40呎</button>
+          <button class="ctab" onclick="selCont('40hc', this)">40呎高櫃</button>
+        </div>
+        <div class="cont-info-grid" id="contInfoGrid">
+          <div class="cont-info-item">
+            <div class="cont-info-label">長度</div>
+            <div class="cont-info-value" id="ci-l">589 cm</div>
+          </div>
+          <div class="cont-info-item">
+            <div class="cont-info-label">寬度</div>
+            <div class="cont-info-value" id="ci-w">235 cm</div>
+          </div>
+          <div class="cont-info-item">
+            <div class="cont-info-label">高度</div>
+            <div class="cont-info-value" id="ci-h">239 cm</div>
+          </div>
+          <div class="cont-info-item">
+            <div class="cont-info-label">最大載重</div>
+            <div class="cont-info-value" id="ci-wt">28,000 kg</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. HISTORY -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">🕒 歷史記錄</span>
+      </div>
+      <div class="section-body" style="padding-bottom:8px">
+        <div class="history-list" id="historyList"></div>
+        <div class="history-actions">
+          <button class="btn btn-ghost btn-sm" onclick="backupAll()">⬇ 備份</button>
+          <button class="btn btn-ghost btn-sm" onclick="triggerRestore()">⬆ 還原</button>
+          <input type="file" id="restoreInput" accept=".json" onchange="restoreBackup(this)" style="display:none">
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. ITEMS LIST -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">📦 品項清單</span>
+        <span id="itemsCount" style="font-size:11px;color:var(--text3)">0 項</span>
+      </div>
+      <div class="section-body" style="padding:8px 8px">
+        <div class="items-list" id="itemsList">
+          <div class="items-empty">尚未新增任何品項</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. ADD FORM -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">➕ 手動新增</span>
+      </div>
+      <div class="section-body">
+        <div class="form-grid">
+          <div class="form-row cols-2">
+            <div class="form-field">
+              <label class="form-label">廠商 Vendor</label>
+              <select class="form-select" id="fVendor">
+                <option value="A">A</option>
+                <option value="B">B</option>
+                <option value="C">C</option>
+                <option value="D">D</option>
+                <option value="E">E</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label class="form-label">Article#（選填）</label>
+              <input type="text" class="form-input mono" id="fArticle" placeholder="BG021">
+            </div>
+          </div>
+          <div class="form-field">
+            <label class="form-label">品項名稱 <req-star>*</req-star></label>
+            <input type="text" class="form-input" id="fName" placeholder="例：分切刀A型">
+          </div>
+          <div class="form-row cols-3">
+            <div class="form-field">
+              <label class="form-label">長 (cm)</label>
+              <input type="number" class="form-input" id="fL" placeholder="60" min="1">
+            </div>
+            <div class="form-field">
+              <label class="form-label">寬 (cm)</label>
+              <input type="number" class="form-input" id="fW" placeholder="40" min="1">
+            </div>
+            <div class="form-field">
+              <label class="form-label">高 (cm)</label>
+              <input type="number" class="form-input" id="fH" placeholder="35" min="1">
+            </div>
+          </div>
+          <div class="form-row cols-2">
+            <div class="form-field">
+              <label class="form-label">重量 (kg)</label>
+              <input type="number" class="form-input" id="fWt" placeholder="12" min="0.01" step="0.1">
+            </div>
+            <div class="form-field">
+              <label class="form-label">數量</label>
+              <input type="number" class="form-input" id="fQty" placeholder="20" min="1" value="1">
+            </div>
+          </div>
+          <div class="form-row cols-2">
+            <div class="form-field">
+              <label class="form-label">方向限制</label>
+              <select class="form-select" id="fDir">
+                <option value="free">free（任意）</option>
+                <option value="up">up（朝上）</option>
+                <option value="fixed">fixed（固定）</option>
+              </select>
+            </div>
+            <div class="form-field">
+              <label class="form-label">堆壓限制</label>
+              <select class="form-select" id="fStack" onchange="toggleStack(this)">
+                <option value="yes">yes（允許）</option>
+                <option value="no">no（禁止）</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-field" id="maxStackRow">
+            <label class="form-label">最多堆幾層</label>
+            <input type="number" class="form-input" id="fMaxStack" placeholder="3" min="1" value="3">
+          </div>
+        </div>
+        <button class="btn btn-primary" style="width:100%;margin-top:10px" onclick="addItem()">＋ 新增品項</button>
+      </div>
+    </div>
+
+  </div><!-- /left-panel -->
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+    <!-- TAB BAR -->
+    <div class="tab-bar">
+      <button class="tab active" onclick="showView('front', this)">正視圖</button>
+      <button class="tab" onclick="showView('top', this)">俯視圖</button>
+      <button class="tab" onclick="showView('report', this)">裝載報告</button>
+      <button class="tab" onclick="showView('3d', this)">3D 視圖</button>
+      <div class="tab-spacer"></div>
+      <div class="tab-extra">
+        <button class="btn-3d-toggle" id="btn3dToggle" onclick="toggle3D()">⏸ 關閉 3D</button>
+      </div>
+    </div>
+
+    <!-- FRONT VIEW -->
+    <div class="view-panel active" id="view-front">
+      <div class="empty-state" id="frontEmpty">
+        <div class="empty-icon">📐</div>
+        <div class="empty-title">尚無裝載結果</div>
+        <div class="empty-sub">請新增品項後點擊「計算裝載」</div>
+      </div>
+      <div class="canvas-scroll" id="frontCanvasWrap" style="display:none">
+        <canvas id="cvFrontMain"></canvas>
+      </div>
+    </div>
+
+    <!-- TOP VIEW -->
+    <div class="view-panel" id="view-top">
+      <div class="empty-state" id="topEmpty">
+        <div class="empty-icon">🗺</div>
+        <div class="empty-title">尚無裝載結果</div>
+        <div class="empty-sub">請先執行計算</div>
+      </div>
+      <div class="canvas-scroll" id="topCanvasWrap" style="display:none">
+        <canvas id="cvTopMain"></canvas>
+      </div>
+    </div>
+
+    <!-- REPORT VIEW -->
+    <div class="view-panel" id="view-report">
+      <div class="empty-state" id="reportEmpty">
+        <div class="empty-icon">📋</div>
+        <div class="empty-title">尚無裝載報告</div>
+        <div class="empty-sub">請先執行計算</div>
+      </div>
+      <div class="report-scroll report-hidden" id="reportContent">
+        <div class="stats-grid" id="statsGrid"></div>
+        <div class="progress-bar-wrap" id="progressWrap"></div>
+        <div class="report-table-wrap" id="loadedTableWrap"></div>
+        <div class="report-table-wrap report-hidden" id="unloadedTableWrap"></div>
+        <div class="cont-info-footer" id="reportFooter"></div>
+      </div>
+    </div>
+
+    <!-- 3D VIEW -->
+    <div class="view-panel" id="view-3d">
+      <div class="view-3d-wrap" id="view3dWrap">
+        <canvas id="c3d"></canvas>
+        <div class="empty-3d" id="empty3d">
+          <div class="empty-3d-icon">🧊</div>
+          <div class="empty-3d-text">請先執行計算以顯示 3D 視圖</div>
+        </div>
+        <div class="hint-3d" id="hint3d" style="display:none">拖曳旋轉 · 滾輪縮放</div>
+        <div class="perf-warn" id="perfWarn">⚠ 物件數量較多，效能可能受影響</div>
+      </div>
+    </div>
+
+  </div><!-- /right-panel -->
+</div><!-- /app-body -->
+
+<!-- CALCULATE BUTTON -->
+<div style="position:fixed;bottom:0;left:0;width:380px;background:var(--bg);border-top:1px solid var(--border);padding:8px 0 10px;z-index:50">
+  <button class="btn-calc" onclick="calculate()">🚀 計算裝載</button>
+</div>
+
+<!-- MODAL: Sheet Selection -->
+<div class="modal-overlay" id="sheetModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">選擇工作表</div>
+        <div class="modal-subtitle">請選擇要匯入的工作表</div>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="sheet-list" id="sheetList"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('sheetModal')">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Column Mapping -->
+<div class="modal-overlay" id="colMapModal">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">確認欄位對應</div>
+        <div class="modal-subtitle" id="colMapSubtitle">已解析 0 筆資料</div>
+      </div>
+    </div>
+    <div class="modal-body">
+      <table class="col-map-table" id="colMapTable"></table>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('colMapModal')">取消</button>
+      <button class="btn btn-primary" onclick="confirmImport()">確認匯入</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Smart Hints -->
+<div class="modal-overlay" id="hintsModal" onclick="if(event.target===this)closeModal('hintsModal')">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="hintsModalTitle">裝載提示</div>
+    </div>
+    <div class="modal-body">
+      <div class="hints-content" id="hintsContent"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="closeModal('hintsModal')">了解</button>
+    </div>
+  </div>
+</div>
+
+<!-- LOADING OVERLAY -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="loading-spinner"></div>
+  <div class="loading-msg" id="loadingMsg">計算中，請稍候...</div>
+</div>
+
+<script>
+// ===================== CONSTANTS =====================
+const CONTS = {
+  '20ft': { l: 589, w: 235, h: 239, maxWt: 28000, label: '20呎' },
+  '40ft': { l: 1200, w: 235, h: 239, maxWt: 26500, label: '40呎' },
+  '40hc': { l: 1200, w: 235, h: 269, maxWt: 26500, label: '40呎高櫃' },
+};
+
+const VENDOR_PALETTES = {
+  'A': ['#FF6B35','#FF9500','#FFCC02','#FF8C42','#E8531F'],
+  'B': ['#007AFF','#5856D6','#00BCD4','#5AC8FA','#34AADC'],
+  'C': ['#34C759','#4CD964','#00C853','#8BC34A','#2ECC71'],
+  'D': ['#FF2D55','#FF375F','#F72585','#E91E63','#C2185B'],
+  'E': ['#BF5AF2','#9B59B6','#A855F7','#7C3AED','#6D28D9'],
+};
+
+const DEFAULT_PALETTE = ['#FF6B35','#007AFF','#34C759','#FF2D55','#BF5AF2','#FF9500','#5AC8FA','#8BC34A'];
+const STORAGE_KEY = 'cargo_records';
+const MAX_RECORDS = 30;
+
+const FIELD_KEYWORDS = {
+  vendor:   ['vendor','客戶','廠商','供應商'],
+  article:  ['article','料號','編號','part','model','item no','item#'],
+  name:     ['品項','名稱','貨名','item','name','description','品名'],
+  l:        ['長','長度','length','len'],
+  w:        ['寬','寬度','width','wid'],
+  h:        ['高','高度','height','hei'],
+  wt:       ['重','重量','weight','wt','kg'],
+  qty:      ['數','數量','qty','quantity','count','order','件數','箱數'],
+  dir:      ['方向','direction','dir'],
+  stack:    ['堆壓','stack'],
+  maxStack: ['堆層','層數','maxstack'],
+};
+
+// ===================== STATE =====================
+let cont = '20ft';
+let items = [];
+let result = null;
+let pendingWb = null;
+let pendingImport = null;
+let scene, camera, renderer, animFrameId;
+let is3DInit = false;
+let is3DEnabled = true;
+let spherical = { theta: 0.8, phi: 0.7, r: 1800 };
+let mouse3D = { down: false, x: 0, y: 0 };
+
+// ===================== COLOR =====================
+function rebuildColors() {
+  const vendorIdx = {};
+  items.forEach(item => {
+    const v = String(item.vendor || 'A').toUpperCase();
+    if (vendorIdx[v] === undefined) vendorIdx[v] = 0;
+    const palette = VENDOR_PALETTES[v] || DEFAULT_PALETTE;
+    item.color = palette[vendorIdx[v]++ % palette.length];
+  });
+}
+
+// ===================== CONTAINER =====================
+function selCont(type, el) {
+  cont = type;
+  document.querySelectorAll('.ctab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  const c = CONTS[type];
+  document.getElementById('ci-l').textContent = c.l + ' cm';
+  document.getElementById('ci-w').textContent = c.w + ' cm';
+  document.getElementById('ci-h').textContent = c.h + ' cm';
+  document.getElementById('ci-wt').textContent = c.maxWt.toLocaleString() + ' kg';
+}
+
+// ===================== FILE HANDLING =====================
+function handleFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  // Auto-fill shipment ID
+  const sid = document.getElementById('shipmentId');
+  if (!sid.value) {
+    const baseName = file.name.replace(/\.[^.]+$/, '');
+    sid.value = baseName;
+  }
+
+  // Show file info
+  const fi = document.getElementById('fileInfo');
+  document.getElementById('fileInfoText').textContent = file.name + ' (' + (file.size / 1024).toFixed(1) + ' KB)';
+  fi.classList.add('show');
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = e.target.result;
+      let wb;
+      if (file.name.endsWith('.csv')) {
+        wb = XLSX.read(data, { type: 'string' });
+      } else {
+        wb = XLSX.read(data, { type: 'binary' });
+      }
+
+      if (wb.SheetNames.length > 1) {
+        showSheetModal(wb);
+      } else {
+        processSheet(wb, wb.SheetNames[0]);
+      }
+    } catch(err) {
+      alert('檔案解析失敗：' + err.message);
+    }
+  };
+
+  if (file.name.endsWith('.csv')) {
+    reader.readAsText(file, 'UTF-8');
+  } else {
+    reader.readAsBinaryString(file);
+  }
+}
+
+function showSheetModal(wb) {
+  pendingWb = wb;
+  const list = document.getElementById('sheetList');
+  list.innerHTML = '';
+  wb.SheetNames.forEach(name => {
+    const item = document.createElement('div');
+    item.className = 'sheet-item';
+    item.innerHTML = '📄 ' + name;
+    item.onclick = () => selectSheet(name);
+    list.appendChild(item);
+  });
+  openModal('sheetModal');
+}
+
+function selectSheet(sheetName) {
+  closeModal('sheetModal');
+  if (!pendingWb) return;
+  processSheet(pendingWb, sheetName);
+  pendingWb = null;
+}
+
+function processSheet(wb, sheetName) {
+  const ws = wb.Sheets[sheetName];
+  const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  processParsedData(data);
+}
+
+function processParsedData(data) {
+  if (!data || data.length < 2) {
+    alert('資料不足，至少需要標題列和一筆資料。');
+    return;
+  }
+
+  // Find header row (first non-empty row)
+  let headerRowIdx = 0;
+  for (let i = 0; i < Math.min(5, data.length); i++) {
+    if (data[i].some(c => c !== '' && c !== null && c !== undefined)) {
+      headerRowIdx = i;
+      break;
+    }
+  }
+
+  const headers = data[headerRowIdx].map(h => String(h || '').trim());
+  const rows = data.slice(headerRowIdx + 1).filter(r => r.some(c => c !== '' && c !== null && c !== undefined));
+
+  // Fuzzy match headers
+  const mapping = {};
+  Object.keys(FIELD_KEYWORDS).forEach(field => {
+    const keywords = FIELD_KEYWORDS[field];
+    let bestIdx = -1;
+    let bestScore = 0;
+    headers.forEach((h, idx) => {
+      const hl = h.toLowerCase();
+      keywords.forEach(kw => {
+        if (hl.includes(kw.toLowerCase())) {
+          const score = kw.length;
+          if (score > bestScore) {
+            bestScore = score;
+            bestIdx = idx;
+          }
+        }
+      });
+    });
+    if (bestIdx >= 0) mapping[field] = bestIdx;
+  });
+
+  pendingImport = { headers, rows, mapping };
+
+  // Build column mapping table
+  const table = document.getElementById('colMapTable');
+  const requiredFields = ['name', 'l', 'w', 'h', 'wt', 'qty'];
+  const fieldLabels = {
+    vendor: '廠商 Vendor',
+    article: '料號 Article',
+    name: '品項名稱 *',
+    l: '長度 L *',
+    w: '寬度 W *',
+    h: '高度 H *',
+    wt: '重量 WT *',
+    qty: '數量 QTY *',
+    dir: '方向 Dir',
+    stack: '堆壓 Stack',
+    maxStack: '最多堆層'
+  };
+
+  let html = '<thead><tr><th>欄位</th><th>對應到 Excel 欄</th></tr></thead><tbody>';
+  Object.keys(fieldLabels).forEach(field => {
+    const isReq = requiredFields.includes(field);
+    const currentIdx = mapping[field] !== undefined ? mapping[field] : -1;
+    let opts = '<option value="-1">（略過）</option>';
+    headers.forEach((h, i) => {
+      const sel = i === currentIdx ? ' selected' : '';
+      opts += `<option value="${i}"${sel}>${h || '(空白)'}</option>`;
+    });
+    html += `<tr>
+      <td>${fieldLabels[field]}${isReq ? ' <span style="color:var(--danger)">*</span>' : ''}</td>
+      <td><select class="form-select" data-field="${field}" style="font-size:11px;padding:4px 6px">${opts}</select></td>
+    </tr>`;
+  });
+  html += '</tbody>';
+  table.innerHTML = html;
+
+  document.getElementById('colMapSubtitle').textContent = `已解析 ${rows.length} 筆資料`;
+  openModal('colMapModal');
+}
+
+function confirmImport() {
+  if (!pendingImport) return;
+  const { rows } = pendingImport;
+
+  // Read current mapping from UI
+  const mapping = {};
+  document.querySelectorAll('#colMapTable select[data-field]').forEach(sel => {
+    const field = sel.getAttribute('data-field');
+    const val = parseInt(sel.value);
+    if (val >= 0) mapping[field] = val;
+  });
+
+  // Validate required fields
+  const required = ['name', 'l', 'w', 'h', 'wt', 'qty'];
+  const missing = required.filter(f => mapping[f] === undefined);
+  if (missing.length > 0) {
+    alert('請指定必填欄位：' + missing.join(', '));
+    return;
+  }
+
+  closeModal('colMapModal');
+
+  if (rows.length > 500) {
+    showLoading('匯入中，請稍候...');
+  }
+
+  setTimeout(() => {
+    // Group by key
+    const groups = {};
+    let added = 0;
+
+    rows.forEach(row => {
+      const qtyRaw = mapping.qty !== undefined ? row[mapping.qty] : '';
+      if (qtyRaw === '' || qtyRaw === null || qtyRaw === undefined) return;
+      const qtyStr = String(qtyRaw).trim();
+      if (qtyStr === '0' || qtyStr.toLowerCase() === 'none' || qtyStr === '') return;
+      const qty = parseInt(qtyStr) || 0;
+      if (qty <= 0) return;
+
+      const l = parseFloat(row[mapping.l]) || 0;
+      const w = parseFloat(row[mapping.w]) || 0;
+      const h = parseFloat(row[mapping.h]) || 0;
+      const wt = parseFloat(row[mapping.wt]) || 0;
+      if (l <= 0 || w <= 0 || h <= 0 || wt <= 0) return;
+
+      const vendor = String(mapping.vendor !== undefined ? row[mapping.vendor] : 'A').trim() || 'A';
+      const article = mapping.article !== undefined ? String(row[mapping.article] || '').trim() : '';
+      const name = String(row[mapping.name] || '').trim();
+      if (!name) return;
+
+      const dir = mapping.dir !== undefined ? String(row[mapping.dir] || 'free').toLowerCase() : 'free';
+      const stackRaw = mapping.stack !== undefined ? String(row[mapping.stack] || 'yes').toLowerCase() : 'yes';
+      const stack = stackRaw.includes('no') || stackRaw === '否' || stackRaw === 'false' ? 'no' : 'yes';
+      const maxStack = mapping.maxStack !== undefined ? (parseInt(row[mapping.maxStack]) || 3) : 3;
+
+      const key = `${vendor}|${article}|${name}|${l}|${w}|${h}|${wt}`;
+      if (groups[key]) {
+        groups[key].qty += qty;
+      } else {
+        groups[key] = { id: Date.now() + added, vendor, article, name, l, w, h, wt, qty, dir, stack, maxStack, color: '#007AFF' };
+        added++;
+      }
+    });
+
+    const newItems = Object.values(groups);
+    if (newItems.length === 0) {
+      hideLoading();
+      alert('未找到有效資料，請確認欄位對應是否正確。');
+      return;
+    }
+
+    items = items.concat(newItems);
+    rebuildColors();
+    renderItems();
+    autoSave();
+    hideLoading();
+  }, 50);
+}
+
+function clearFile() {
+  document.getElementById('fileInput').value = '';
+  document.getElementById('fileInfo').classList.remove('show');
+}
+
+// ===================== TEMPLATE =====================
+function downloadTemplate() {
+  const csv = 'Vendor,Article,品項名稱,長(cm),寬(cm),高(cm),重量(kg),數量,方向限制,堆壓,最多堆層數\nA,BG021,分切刀A型,60,40,35,12,20,up,yes,3\nA,BG022,精密墊片B,30,30,20,5,50,free,yes,5\nB,CX100,機台底座C,120,80,60,85,5,fixed,no,1\n';
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'cargo_template.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ===================== ITEMS =====================
+function addItem() {
+  const vendor = document.getElementById('fVendor').value;
+  const article = document.getElementById('fArticle').value.trim();
+  const name = document.getElementById('fName').value.trim();
+  const l = parseFloat(document.getElementById('fL').value);
+  const w = parseFloat(document.getElementById('fW').value);
+  const h = parseFloat(document.getElementById('fH').value);
+  const wt = parseFloat(document.getElementById('fWt').value);
+  const qty = parseInt(document.getElementById('fQty').value);
+  const dir = document.getElementById('fDir').value;
+  const stack = document.getElementById('fStack').value;
+  const maxStack = parseInt(document.getElementById('fMaxStack').value) || 3;
+
+  if (!name) { alert('請輸入品項名稱'); return; }
+  if (!(l > 0) || !(w > 0) || !(h > 0)) { alert('請輸入正確的長寬高（必須 > 0）'); return; }
+  if (!(wt > 0)) { alert('請輸入正確的重量（必須 > 0）'); return; }
+  if (!(qty >= 1)) { alert('數量至少為 1'); return; }
+
+  items.push({ id: Date.now(), vendor, article, name, l, w, h, wt, qty, dir, stack, maxStack, color: '#007AFF' });
+  rebuildColors();
+  renderItems();
+  autoSave();
+
+  // Clear form
+  document.getElementById('fArticle').value = '';
+  document.getElementById('fName').value = '';
+  document.getElementById('fL').value = '';
+  document.getElementById('fW').value = '';
+  document.getElementById('fH').value = '';
+  document.getElementById('fWt').value = '';
+  document.getElementById('fQty').value = '1';
+}
+
+function deleteItem(id) {
+  items = items.filter(it => it.id !== id);
+  rebuildColors();
+  renderItems();
+  autoSave();
+}
+
+function toggleStack(el) {
+  const row = document.getElementById('maxStackRow');
+  row.style.display = el.value === 'yes' ? 'block' : 'none';
+}
+
+function renderItems() {
+  const list = document.getElementById('itemsList');
+  const countEl = document.getElementById('itemsCount');
+  countEl.textContent = items.length + ' 項';
+
+  if (items.length === 0) {
+    list.innerHTML = '<div class="items-empty">尚未新增任何品項</div>';
+    return;
+  }
+
+  list.innerHTML = items.map(it => {
+    const dirTag = `<span class="tag tag-${it.dir || 'free'}">${it.dir || 'free'}</span>`;
+    const stackTag = `<span class="tag tag-stack-${it.stack || 'yes'}">${it.stack === 'no' ? '禁疊' : '可疊'}</span>`;
+    const dimStr = `${it.l}×${it.w}×${it.h} cm`;
+    const wtStr = `${it.wt} kg`;
+    return `<div class="item-card">
+      <div class="item-card-head">
+        <span class="vendor-badge" style="background:${it.color}">${it.vendor || 'A'}</span>
+        ${it.article ? `<span class="item-article">${it.article}</span>` : ''}
+        <span class="item-name">${it.name}</span>
+        <span class="qty-badge">×${it.qty}</span>
+        <button class="item-del" onclick="deleteItem(${it.id})">×</button>
+      </div>
+      <div class="item-card-body">
+        <span>📐 ${dimStr}</span>
+        <span>⚖ ${wtStr}</span>
+        ${dirTag}${stackTag}
+        ${it.stack === 'yes' ? `<span style="font-size:10px;color:var(--text4)">max ${it.maxStack}層</span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ===================== CALCULATE =====================
+function calculate() {
+  if (items.length === 0) {
+    alert('請先新增品項再計算裝載');
+    return;
+  }
+
+  showLoading('計算中，請稍候...');
+
+  setTimeout(() => {
+    try {
+      result = packEP(items, CONTS[cont], cont);
+      hideLoading();
+      showView('front', document.querySelectorAll('.tab')[0]);
+      renderViews();
+      showSmartHints();
+    } catch(e) {
+      hideLoading();
+      alert('計算錯誤：' + e.message);
+      console.error(e);
+    }
+  }, 60);
+}
+
+// ===================== EXTREME POINT PACKING =====================
+function packEP(itemList, contSpec, contKey) {
+  const { l: CL, w: CW, h: CH, maxWt } = contSpec;
+
+  // Expand items
+  const allBoxes = [];
+  itemList.forEach(it => {
+    for (let i = 0; i < it.qty; i++) {
+      allBoxes.push({
+        ...it,
+        id: it.id + '_' + i,
+        origId: it.id,
+      });
+    }
+  });
+
+  // Sort
+  allBoxes.sort((a, b) => {
+    if (a.stack !== b.stack) return a.stack === 'no' ? -1 : 1;
+    const va = String(a.vendor || 'A').toUpperCase();
+    const vb = String(b.vendor || 'A').toUpperCase();
+    if (va !== vb) return va.localeCompare(vb);
+    if (b.wt !== a.wt) return b.wt - a.wt;
+    return (b.l * b.w * b.h) - (a.l * a.w * a.h);
+  });
+
+  const placed = [];
+  const unplaced = [];
+  let totalWt = 0;
+
+  // Extreme points
+  let eps = [{ x: 0, y: 0, z: 0 }];
+
+  // Weight zones (3 zones along length)
+  const zoneWt = [0, 0, 0];
+  const zoneL = CL / 3;
+  const maxZoneWt = maxWt * 0.6;
+
+  for (const box of allBoxes) {
+    // Generate rotations based on dir
+    const rotations = getRotations(box);
+    let best = null;
+    let bestScore = Infinity;
+
+    for (const ep of eps) {
+      for (const rot of rotations) {
+        const { bx, by, bz, bw, bh, bl } = rot;
+        const x = ep.x, y = ep.y, z = ep.z;
+
+        // Bounds check
+        if (x + bl > CL + 0.001) continue;
+        if (z + bw > CW + 0.001) continue;
+        if (y + bh > CH + 0.001) continue;
+
+        // Weight check
+        if (totalWt + box.wt > maxWt) continue;
+
+        // Zone weight check
+        const zoneIdx = Math.min(2, Math.floor(x / zoneL));
+        if (zoneWt[zoneIdx] + box.wt > maxZoneWt) continue;
+
+        // Overlap check
+        if (hasOverlap(placed, x, y, z, bl, bh, bw)) continue;
+
+        // Support check (for y > 0)
+        if (y > 0.001 && !isSupported(placed, x, y, z, bl, bw)) continue;
+
+        // Stack check
+        if (y > 0.001) {
+          const below = getBoxesBelow(placed, x, y, z, bl, bw);
+          if (below.some(b => b.stack === 'no')) continue;
+          if (below.some(b => b.stack === 'yes' && b.maxStack !== undefined)) {
+            const maxH = Math.max(...below.filter(b => b.stack === 'yes').map(b => b.maxStack || 99));
+            const stackHeight = getStackHeight(placed, x, z, bl, bw);
+            if (stackHeight >= maxH) continue;
+          }
+        }
+
+        const score = y * 1e10 + x * 1e5 + z;
+        if (score < bestScore) {
+          bestScore = score;
+          best = { x, y, z, bl, bh, bw };
+        }
+      }
+    }
+
+    if (best) {
+      const zoneIdx = Math.min(2, Math.floor(best.x / zoneL));
+      zoneWt[zoneIdx] += box.wt;
+      totalWt += box.wt;
+      placed.push({
+        ...box,
+        px: best.x, py: best.y, pz: best.z,
+        pl: best.bl, ph: best.bh, pw: best.bw,
+      });
+
+      // Add extreme points
+      const newEps = [
+        { x: best.x + best.bl, y: best.y, z: best.z },
+        { x: best.x, y: best.y + best.bh, z: best.z },
+        { x: best.x, y: best.y, z: best.z + best.bw },
+      ];
+
+      newEps.forEach(ep => {
+        if (ep.x <= CL && ep.y <= CH && ep.z <= CW) {
+          if (!eps.some(e => Math.abs(e.x - ep.x) < 0.1 && Math.abs(e.y - ep.y) < 0.1 && Math.abs(e.z - ep.z) < 0.1)) {
+            eps.push(ep);
+          }
+        }
+      });
+    } else {
+      unplaced.push(box);
+    }
+  }
+
+  const usedVol = placed.reduce((s, b) => s + b.pl * b.ph * b.pw, 0);
+  const contVol = CL * CW * CH;
+  const volRate = usedVol / contVol;
+  const wtRate = totalWt / maxWt;
+
+  return { placed, unplaced, totalWt, usedVol, volRate, wtRate, contKey, contSpec };
+}
+
+function getRotations(box) {
+  const { l, w, h, dir } = box;
+  const rotations = [];
+
+  if (dir === 'fixed') {
+    rotations.push({ bx: 0, by: 0, bz: 0, bl: l, bh: h, bw: w });
+  } else if (dir === 'up') {
+    // Height must remain as height
+    rotations.push({ bx: 0, by: 0, bz: 0, bl: l, bh: h, bw: w });
+    rotations.push({ bx: 0, by: 0, bz: 0, bl: w, bh: h, bw: l });
+  } else {
+    // All 6 rotations (3 unique for rectangular boxes with no permutation)
+    rotations.push({ bx: 0, by: 0, bz: 0, bl: l, bh: h, bw: w });
+    rotations.push({ bx: 0, by: 0, bz: 0, bl: w, bh: h, bw: l });
+    rotations.push({ bx: 0, by: 0, bz: 0, bl: l, bh: w, bw: h });
+    rotations.push({ bx: 0, by: 0, bz: 0, bl: h, bh: w, bw: l });
+    rotations.push({ bx: 0, by: 0, bz: 0, bl: h, bh: l, bw: w });
+    rotations.push({ bx: 0, by: 0, bz: 0, bl: w, bh: l, bw: h });
+  }
+  return rotations;
+}
+
+function hasOverlap(placed, x, y, z, l, h, w) {
+  const eps = 0.001;
+  for (const b of placed) {
+    if (x + l > b.px + eps && b.px + b.pl > x + eps &&
+        y + h > b.py + eps && b.py + b.ph > y + eps &&
+        z + w > b.pz + eps && b.pz + b.pw > z + eps) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isSupported(placed, x, y, z, l, w) {
+  // Check if at least some percentage of the base is supported
+  const eps = 0.1;
+  for (const b of placed) {
+    if (Math.abs(b.py + b.ph - y) < eps) {
+      const ox = Math.min(x + l, b.px + b.pl) - Math.max(x, b.px);
+      const oz = Math.min(z + w, b.pz + b.pw) - Math.max(z, b.pz);
+      if (ox > 0.1 && oz > 0.1) return true;
+    }
+  }
+  return false;
+}
+
+function getBoxesBelow(placed, x, y, z, l, w) {
+  const eps = 0.1;
+  return placed.filter(b => {
+    if (Math.abs(b.py + b.ph - y) > eps) return false;
+    const ox = Math.min(x + l, b.px + b.pl) - Math.max(x, b.px);
+    const oz = Math.min(z + w, b.pz + b.pw) - Math.max(z, b.pz);
+    return ox > 0.1 && oz > 0.1;
+  });
+}
+
+function getStackHeight(placed, x, z, l, w) {
+  const eps = 0.1;
+  let count = 0;
+  const col = placed.filter(b => {
+    const ox = Math.min(x + l, b.px + b.pl) - Math.max(x, b.px);
+    const oz = Math.min(z + w, b.pz + b.pw) - Math.max(z, b.pz);
+    return ox > 0.1 && oz > 0.1;
+  });
+  return col.length;
+}
+
+// ===================== RENDER VIEWS =====================
+function renderViews() {
+  if (!result) return;
+
+  // Show/hide empty states
+  document.getElementById('frontEmpty').style.display = 'none';
+  document.getElementById('frontCanvasWrap').style.display = 'block';
+  document.getElementById('topEmpty').style.display = 'none';
+  document.getElementById('topCanvasWrap').style.display = 'block';
+  document.getElementById('reportEmpty').style.display = 'none';
+  document.getElementById('reportContent').classList.remove('report-hidden');
+  document.getElementById('empty3d').style.display = 'none';
+  document.getElementById('hint3d').style.display = 'block';
+
+  drawFrontView();
+  drawTopView();
+  renderReport();
+  if (is3DInit && is3DEnabled) render3D();
+}
+
+// ===================== FRONT VIEW =====================
+function drawFrontView() {
+  if (!result) return;
+  const { placed, contSpec } = result;
+  const { l: CL, h: CH } = contSpec;
+
+  const PAD_L = 60, PAD_R = 200, PAD_T = 24, PAD_B = 56;
+  const wrap = document.getElementById('frontCanvasWrap');
+  const availH = Math.max(300, wrap.clientHeight - 32 || 500);
+  const scale = (availH - PAD_T - PAD_B) / CH;
+  const canvasW = Math.max(wrap.clientWidth - 32 || 900, CL * scale + PAD_L + PAD_R + 20);
+  const canvasH = availH;
+
+  const canvas = document.getElementById('cvFrontMain');
+  canvas.width = canvasW;
+  canvas.height = canvasH;
+  const ctx = canvas.getContext('2d');
+
+  // Background
+  ctx.fillStyle = '#FAFAFA';
+  ctx.fillRect(0, 0, canvasW, canvasH);
+
+  const toX = x => PAD_L + x * scale;
+  const toY = y => canvasH - PAD_B - y * scale;
+  const contW = CL * scale;
+  const contH = CH * scale;
+
+  // Grid lines
+  ctx.strokeStyle = '#EBEBEB';
+  ctx.lineWidth = 0.8;
+  for (let x = 0; x <= CL; x += 100) {
+    ctx.beginPath();
+    ctx.moveTo(toX(x), PAD_T);
+    ctx.lineTo(toX(x), canvasH - PAD_B);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= CH; y += 50) {
+    ctx.beginPath();
+    ctx.moveTo(PAD_L, toY(y));
+    ctx.lineTo(PAD_L + contW, toY(y));
+    ctx.stroke();
+  }
+
+  // Draw boxes (back to front: sorted by pz descending)
+  const sortedPlaced = [...placed].sort((a, b) => b.pz - a.pz);
+  sortedPlaced.forEach(b => {
+    const x = toX(b.px), y = toY(b.py + b.ph);
+    const bw = b.pl * scale, bh = b.ph * scale;
+
+    ctx.fillStyle = b.color + 'B0';
+    ctx.fillRect(x, y, bw, bh);
+    ctx.strokeStyle = b.color;
+    ctx.lineWidth = 1.2;
+    ctx.strokeRect(x, y, bw, bh);
+
+    // Label
+    if (bw > 24 && bh > 14) {
+      const lbl = b.article || b.name.slice(0, 6);
+      ctx.fillStyle = '#1D1D1F';
+      ctx.font = `${Math.min(10, bh * 0.55)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(lbl, x + bw / 2, y + bh / 2);
+    }
+  });
+
+  // Container outline
+  ctx.strokeStyle = '#007AFF';
+  ctx.lineWidth = 2.5;
+  ctx.strokeRect(PAD_L, PAD_T, contW, contH);
+
+  // Floor line
+  ctx.strokeStyle = '#444';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(PAD_L, canvasH - PAD_B);
+  ctx.lineTo(PAD_L + contW, canvasH - PAD_B);
+  ctx.stroke();
+
+  // Section markers every 50cm
+  ctx.fillStyle = '#6E6E73';
+  ctx.font = '9px IBM Plex Mono, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (let x = 0; x <= CL; x += 50) {
+    const px = toX(x);
+    ctx.beginPath();
+    ctx.moveTo(px, canvasH - PAD_B);
+    ctx.lineTo(px, canvasH - PAD_B + 4);
+    ctx.strokeStyle = '#AEAEB2';
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    if (x % 100 === 0) {
+      ctx.fillText(x, px, canvasH - PAD_B + 6);
+    }
+  }
+
+  // X axis label
+  ctx.fillStyle = '#6E6E73';
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('← 裝載方向（長度 cm）→', PAD_L + contW / 2, canvasH - 4);
+
+  // Y ticks
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.font = '9px IBM Plex Mono, monospace';
+  for (let y = 0; y <= CH; y += 100) {
+    const py = toY(y);
+    ctx.fillStyle = '#6E6E73';
+    ctx.fillText(y, PAD_L - 4, py);
+    ctx.strokeStyle = '#EBEBEB';
+    ctx.lineWidth = 0.5;
+  }
+
+  // Dimension labels
+  ctx.fillStyle = '#007AFF';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(`L: ${CL} cm`, PAD_L + contW / 2, PAD_T - 4);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.save();
+  ctx.translate(8, PAD_T + contH / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText(`H: ${CH} cm`, 0, 0);
+  ctx.restore();
+
+  // LEGEND (right side)
+  const legendX = PAD_L + contW + 16;
+  let legendY = PAD_T + 6;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+
+  // Group by vendor
+  const vendorGroups = {};
+  placed.forEach(b => {
+    const v = String(b.vendor || 'A').toUpperCase();
+    if (!vendorGroups[v]) vendorGroups[v] = {};
+    const key = b.article || b.name;
+    if (!vendorGroups[v][key]) {
+      vendorGroups[v][key] = { article: b.article, name: b.name, color: b.color, count: 0 };
+    }
+    vendorGroups[v][key].count++;
+  });
+
+  const sortedVendors = Object.keys(vendorGroups).sort();
+  for (const vendor of sortedVendors) {
+    if (legendY > canvasH - 10) break;
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillStyle = '#3A3A3C';
+    ctx.fillText(`Vendor ${vendor}`, legendX, legendY);
+    legendY += 16;
+
+    for (const item of Object.values(vendorGroups[vendor])) {
+      if (legendY > canvasH - 10) break;
+      const lbl = (item.article || item.name.slice(0, 10));
+      ctx.fillStyle = item.color;
+      ctx.fillRect(legendX + 4, legendY - 5, 10, 10);
+      ctx.fillStyle = '#1D1D1F';
+      ctx.font = '9px sans-serif';
+      ctx.fillText(`${lbl}  ${item.count} PCS`, legendX + 18, legendY);
+      legendY += 13;
+    }
+    legendY += 5;
+  }
+}
+
+// ===================== TOP VIEW =====================
+function drawTopView() {
+  if (!result) return;
+  const { placed, contSpec } = result;
+  const { l: CL, w: CW } = contSpec;
+
+  const PAD = 40, PAD_R = 60;
+  const wrap = document.getElementById('topCanvasWrap');
+  const availH = Math.max(200, wrap.clientHeight - 32 || 400);
+  const scale = Math.min((availH - PAD * 2) / CW, (wrap.clientWidth - PAD - PAD_R - 32 || 800) / CL);
+  const canvasW = Math.max(400, CL * scale + PAD + PAD_R + 20);
+  const canvasH = CW * scale + PAD * 2 + 30;
+
+  const canvas = document.getElementById('cvTopMain');
+  canvas.width = canvasW;
+  canvas.height = canvasH;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#FAFAFA';
+  ctx.fillRect(0, 0, canvasW, canvasH);
+
+  const toX = x => PAD + x * scale;
+  const toZ = z => PAD + z * scale;
+
+  // Grid
+  ctx.strokeStyle = '#EBEBEB';
+  ctx.lineWidth = 0.8;
+  for (let x = 0; x <= CL; x += 100) {
+    ctx.beginPath(); ctx.moveTo(toX(x), PAD); ctx.lineTo(toX(x), PAD + CW * scale); ctx.stroke();
+  }
+  for (let z = 0; z <= CW; z += 50) {
+    ctx.beginPath(); ctx.moveTo(PAD, toZ(z)); ctx.lineTo(PAD + CL * scale, toZ(z)); ctx.stroke();
+  }
+
+  // Boxes (sort by py desc = highest first in top view)
+  const sorted = [...placed].sort((a, b) => b.py - a.py);
+  sorted.forEach(b => {
+    const x = toX(b.px), z = toZ(b.pz);
+    const bw = b.pl * scale, bh = b.pw * scale;
+    ctx.fillStyle = b.color + 'C0';
+    ctx.fillRect(x, z, bw, bh);
+    ctx.strokeStyle = b.color;
+    ctx.lineWidth = 1.2;
+    ctx.strokeRect(x, z, bw, bh);
+    if (bw > 20 && bh > 12) {
+      const lbl = b.article || b.name.slice(0, 5);
+      ctx.fillStyle = '#1D1D1F';
+      ctx.font = `${Math.min(9, bh * 0.5)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(lbl, x + bw / 2, z + bh / 2);
+    }
+  });
+
+  // Container outline
+  ctx.strokeStyle = '#007AFF';
+  ctx.lineWidth = 2.5;
+  ctx.strokeRect(PAD, PAD, CL * scale, CW * scale);
+
+  // Labels
+  ctx.fillStyle = '#007AFF';
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(`L: ${CL} cm`, PAD + CL * scale / 2, PAD - 4);
+
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.save();
+  ctx.translate(12, PAD + CW * scale / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText(`W: ${CW} cm`, 0, 0);
+  ctx.restore();
+
+  ctx.fillStyle = '#6E6E73';
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('← 裝載方向（長度 cm）→', PAD + CL * scale / 2, canvasH - 6);
+}
+
+// ===================== REPORT =====================
+function renderReport() {
+  if (!result) return;
+  const { placed, unplaced, totalWt, usedVol, volRate, wtRate, contSpec, contKey } = result;
+
+  // Stats
+  const statsGrid = document.getElementById('statsGrid');
+  statsGrid.innerHTML = `
+    <div class="stat-card">
+      <div class="stat-label">體積使用率</div>
+      <div class="stat-value">${(volRate * 100).toFixed(1)}<span class="stat-unit">%</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">重量使用率</div>
+      <div class="stat-value">${(wtRate * 100).toFixed(1)}<span class="stat-unit">%</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">已裝件數</div>
+      <div class="stat-value">${placed.length}<span class="stat-unit"> pcs</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">總重量</div>
+      <div class="stat-value">${totalWt.toFixed(1)}<span class="stat-unit"> kg</span></div>
+    </div>
+  `;
+
+  // Progress bar
+  const progressWrap = document.getElementById('progressWrap');
+  const pct = Math.min(100, (volRate * 100)).toFixed(1);
+  const barColor = volRate > 0.9 ? 'linear-gradient(90deg,#FF3B30,#FF9500)' : 'linear-gradient(90deg, var(--accent), #5856D6)';
+  progressWrap.innerHTML = `
+    <div class="progress-label-row">
+      <span>體積利用率</span>
+      <span style="color:var(--accent);font-weight:700">${pct}%</span>
+    </div>
+    <div class="progress-track">
+      <div class="progress-fill" style="width:${pct}%;background:${barColor}"></div>
+    </div>
+  `;
+
+  // Summary by item type
+  const summary = {};
+  const allItems = [...placed, ...unplaced];
+  allItems.forEach(b => {
+    const key = b.origId || b.id.toString().split('_')[0];
+    if (!summary[key]) {
+      summary[key] = {
+        vendor: b.vendor || 'A',
+        article: b.article || '',
+        name: b.name,
+        placed: 0,
+        total: b.qty || 1,
+        wt: b.wt,
+        vol: b.l * b.w * b.h,
+        color: b.color,
+      };
+    }
+    summary[key].placed++;
+  });
+
+  // Fix total qty from original items
+  items.forEach(it => {
+    const key = String(it.id);
+    if (summary[key]) summary[key].total = it.qty;
+  });
+
+  const summaryArr = Object.values(summary);
+
+  // Loaded table
+  const loadedWrap = document.getElementById('loadedTableWrap');
+  let loadedHtml = `<div class="report-table-title">已裝載品項</div>
+    <table>
+      <thead><tr>
+        <th>Vendor</th><th>Article</th><th>名稱</th>
+        <th>裝入</th><th>總數</th><th>總重(kg)</th><th>體積(m³)</th><th>狀態</th>
+      </tr></thead><tbody>`;
+
+  summaryArr.filter(s => s.placed > 0).forEach(s => {
+    const pct = s.total > 0 ? s.placed / s.total : 1;
+    let status, cls;
+    if (s.placed >= s.total) { status = '✓ 完整'; cls = 'status-ok'; }
+    else if (s.placed > 0) { status = '⚠ 部分'; cls = 'status-partial'; }
+    else { status = '✕ 未裝'; cls = 'status-fail'; }
+    const vol = (s.vol * s.placed / 1e6).toFixed(3);
+    const totalWtRow = (s.wt * s.placed).toFixed(1);
+    loadedHtml += `<tr>
+      <td><span class="vendor-badge" style="background:${s.color}">${s.vendor}</span></td>
+      <td style="font-family:monospace;font-size:11px">${s.article}</td>
+      <td>${s.name}</td>
+      <td style="font-weight:600">${s.placed}</td>
+      <td style="color:var(--text3)">${s.total}</td>
+      <td>${totalWtRow}</td>
+      <td>${vol}</td>
+      <td class="${cls}">${status}</td>
+    </tr>`;
+  });
+  loadedHtml += '</tbody></table>';
+  loadedWrap.innerHTML = loadedHtml;
+
+  // Unloaded table
+  const unloadedWrap = document.getElementById('unloadedTableWrap');
+  const unloadedSummary = summaryArr.filter(s => s.placed < s.total);
+  if (unloadedSummary.length > 0) {
+    unloadedWrap.classList.remove('report-hidden');
+    let html = `<div class="report-table-title" style="color:var(--danger)">⚠ 未完整裝載品項</div>
+      <table><thead><tr>
+        <th>Vendor</th><th>Article</th><th>名稱</th>
+        <th>裝入</th><th>未裝</th><th>總數</th>
+      </tr></thead><tbody>`;
+    unloadedSummary.forEach(s => {
+      html += `<tr>
+        <td><span class="vendor-badge" style="background:${s.color}">${s.vendor}</span></td>
+        <td style="font-family:monospace;font-size:11px">${s.article}</td>
+        <td>${s.name}</td>
+        <td>${s.placed}</td>
+        <td style="color:var(--danger);font-weight:600">${s.total - s.placed}</td>
+        <td>${s.total}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    unloadedWrap.innerHTML = html;
+  } else {
+    unloadedWrap.classList.add('report-hidden');
+  }
+
+  // Footer
+  const c = contSpec;
+  const contVol = (c.l * c.w * c.h / 1e6).toFixed(2);
+  const usedVolM3 = (usedVol / 1e6).toFixed(2);
+  document.getElementById('reportFooter').innerHTML = `
+    <strong>貨櫃：${CONTS[contKey].label}</strong> &nbsp;|&nbsp;
+    尺寸：${c.l} × ${c.w} × ${c.h} cm &nbsp;|&nbsp;
+    容積：${contVol} m³ &nbsp;|&nbsp;
+    已用：${usedVolM3} m³ &nbsp;|&nbsp;
+    最大載重：${c.maxWt.toLocaleString()} kg
+  `;
+}
+
+// ===================== SMART HINTS =====================
+function showSmartHints() {
+  if (!result) return;
+  const { placed, unplaced, contSpec, volRate, wtRate } = result;
+
+  const modal = document.getElementById('hintsModal');
+  const title = document.getElementById('hintsModalTitle');
+  const content = document.getElementById('hintsContent');
+
+  if (unplaced.length > 0) {
+    // Overflow
+    title.textContent = '⚠ 裝載溢出提示';
+    const unplacedGroups = {};
+    unplaced.forEach(b => {
+      const key = b.article || b.name;
+      unplacedGroups[key] = (unplacedGroups[key] || 0) + 1;
+    });
+    let html = `<p class="hints-warn">有 <strong>${unplaced.length}</strong> 件貨物無法裝入此貨櫃，建議考慮更換較大容積的貨櫃或拆分出貨。</p>
+      <p style="margin-top:8px;font-weight:600">未裝品項：</p>
+      <ul>`;
+    Object.entries(unplacedGroups).forEach(([name, cnt]) => {
+      html += `<li>${name}：${cnt} 件</li>`;
+    });
+    html += '</ul>';
+    content.innerHTML = html;
+  } else {
+    // Remaining space
+    const c = contSpec;
+    const contVol = c.l * c.w * c.h;
+    const usedVol = result.usedVol;
+    const remVol = ((contVol - usedVol) / 1e6).toFixed(2);
+    const remWt = (c.maxWt - result.totalWt).toFixed(0);
+
+    title.textContent = '✅ 裝載完成 — 剩餘空間建議';
+    let html = `<p class="hints-ok">所有品項已順利裝入！</p>
+      <p style="margin-top:8px">剩餘空間：<strong>${remVol} m³</strong> &nbsp;|&nbsp; 剩餘載重：<strong>${remWt} kg</strong></p>`;
+
+    // Suggest what else can fit
+    const suggestions = items.map(it => {
+      const itemVol = it.l * it.w * it.h;
+      const canAdd = Math.min(
+        Math.floor((contVol - usedVol) / itemVol),
+        Math.floor((c.maxWt - result.totalWt) / it.wt)
+      );
+      return { ...it, canAdd };
+    }).filter(s => s.canAdd > 0).sort((a, b) => b.canAdd - a.canAdd);
+
+    if (suggestions.length > 0) {
+      html += `<p style="margin-top:10px;font-weight:600">可追加品項：</p><ul>`;
+      suggestions.slice(0, 5).forEach(s => {
+        html += `<li>${s.name}（${s.article || s.vendor}）：可再加 <strong>${s.canAdd}</strong> 件</li>`;
+      });
+      html += '</ul>';
+    }
+    content.innerHTML = html;
+  }
+
+  openModal('hintsModal');
+}
+
+// ===================== 3D VIEW =====================
+function init3D() {
+  if (is3DInit) return;
+  const canvas = document.getElementById('c3d');
+  const wrap = document.getElementById('view3dWrap');
+
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x1a1a2e);
+
+  const W = wrap.clientWidth || 800;
+  const H = wrap.clientHeight || 600;
+  camera = new THREE.PerspectiveCamera(45, W / H, 1, 20000);
+
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setSize(W, H);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  // Lighting
+  const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+  scene.add(ambient);
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(500, 1000, 500);
+  scene.add(dirLight);
+
+  // Mouse controls
+  canvas.addEventListener('mousedown', e => {
+    mouse3D.down = true;
+    mouse3D.x = e.clientX;
+    mouse3D.y = e.clientY;
+  });
+  window.addEventListener('mouseup', () => { mouse3D.down = false; });
+  window.addEventListener('mousemove', e => {
+    if (!mouse3D.down) return;
+    const dx = e.clientX - mouse3D.x;
+    const dy = e.clientY - mouse3D.y;
+    spherical.theta -= dx * 0.005;
+    spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi + dy * 0.005));
+    mouse3D.x = e.clientX;
+    mouse3D.y = e.clientY;
+    if (is3DEnabled) render3D();
+  });
+  canvas.addEventListener('wheel', e => {
+    spherical.r = Math.max(200, Math.min(8000, spherical.r + e.deltaY * 1.5));
+    if (is3DEnabled) render3D();
+  });
+
+  // Touch
+  let lastTouchDist = 0;
+  canvas.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) {
+      mouse3D.down = true;
+      mouse3D.x = e.touches[0].clientX;
+      mouse3D.y = e.touches[0].clientY;
+    } else if (e.touches.length === 2) {
+      lastTouchDist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+    }
+  });
+  canvas.addEventListener('touchend', () => { mouse3D.down = false; });
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (e.touches.length === 1 && mouse3D.down) {
+      const dx = e.touches[0].clientX - mouse3D.x;
+      const dy = e.touches[0].clientY - mouse3D.y;
+      spherical.theta -= dx * 0.007;
+      spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi + dy * 0.007));
+      mouse3D.x = e.touches[0].clientX;
+      mouse3D.y = e.touches[0].clientY;
+      if (is3DEnabled) render3D();
+    } else if (e.touches.length === 2) {
+      const dist = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      spherical.r = Math.max(200, Math.min(8000, spherical.r - (dist - lastTouchDist) * 5));
+      lastTouchDist = dist;
+      if (is3DEnabled) render3D();
+    }
+  }, { passive: false });
+
+  is3DInit = true;
+}
+
+function render3D() {
+  if (!result || !is3DInit) return;
+  const { placed, contSpec } = result;
+  const { l: CL, w: CW, h: CH } = contSpec;
+
+  // Clear scene objects (keep lights)
+  const toRemove = [];
+  scene.children.forEach(obj => {
+    if (obj.isMesh || obj.isLineSegments || obj.isLine) toRemove.push(obj);
+  });
+  toRemove.forEach(obj => scene.remove(obj));
+
+  // Performance check
+  const perfWarn = document.getElementById('perfWarn');
+  if (placed.length > 1000) {
+    perfWarn.classList.add('show');
+  } else {
+    perfWarn.classList.remove('show');
+  }
+
+  const cx = CL / 2, cy = CH / 2, cz = CW / 2;
+
+  // Container wireframe
+  const contGeo = new THREE.BoxGeometry(CL, CH, CW);
+  const edges = new THREE.EdgesGeometry(contGeo);
+  const contLine = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x007AFF, linewidth: 2 }));
+  contLine.position.set(cx, cy, cz);
+  scene.add(contLine);
+
+  // Floor
+  const floorGeo = new THREE.PlaneGeometry(CL, CW);
+  const floorMat = new THREE.MeshBasicMaterial({ color: 0x2a2a4a, side: THREE.DoubleSide });
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(cx, 0, cz);
+  scene.add(floor);
+
+  // Boxes
+  const limit = placed.length > 1000 ? 1000 : placed.length;
+  for (let i = 0; i < limit; i++) {
+    const b = placed[i];
+    const geo = new THREE.BoxGeometry(b.pl, b.ph, b.pw);
+    const col = new THREE.Color(b.color);
+    const mat = new THREE.MeshLambertMaterial({ color: col, transparent: true, opacity: 0.85 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(b.px + b.pl / 2, b.py + b.ph / 2, b.pz + b.pw / 2);
+    scene.add(mesh);
+
+    // Edge
+    const eGeo = new THREE.EdgesGeometry(geo);
+    const eLine = new THREE.LineSegments(eGeo, new THREE.LineBasicMaterial({ color: col.clone().multiplyScalar(0.7), linewidth: 1 }));
+    eLine.position.copy(mesh.position);
+    scene.add(eLine);
+  }
+
+  // Camera position
+  const sinPhi = Math.sin(spherical.phi);
+  camera.position.set(
+    cx + spherical.r * sinPhi * Math.sin(spherical.theta),
+    cy + spherical.r * Math.cos(spherical.phi),
+    cz + spherical.r * sinPhi * Math.cos(spherical.theta)
+  );
+  camera.lookAt(cx, cy, cz);
+
+  renderer.render(scene, camera);
+}
+
+function toggle3D() {
+  is3DEnabled = !is3DEnabled;
+  const btn = document.getElementById('btn3dToggle');
+  btn.textContent = is3DEnabled ? '⏸ 關閉 3D' : '▶ 開啟 3D';
+  if (is3DEnabled && result) {
+    if (!is3DInit) init3D();
+    render3D();
+  }
+}
+
+// ===================== VIEW SWITCHING =====================
+function showView(v, el) {
+  document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+
+  document.getElementById('view-' + v).classList.add('active');
+  if (el) el.classList.add('active');
+
+  const btn3d = document.getElementById('btn3dToggle');
+  if (v === '3d') {
+    btn3d.classList.add('visible');
+    if (!is3DInit) init3D();
+    if (is3DEnabled && result) {
+      setTimeout(() => {
+        const wrap = document.getElementById('view3dWrap');
+        if (renderer) {
+          renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+          camera.aspect = wrap.clientWidth / wrap.clientHeight;
+          camera.updateProjectionMatrix();
+        }
+        render3D();
+      }, 50);
+    }
+  } else {
+    btn3d.classList.remove('visible');
+  }
+
+  // Redraw canvases on tab switch
+  if (v === 'front' && result) setTimeout(drawFrontView, 30);
+  if (v === 'top' && result) setTimeout(drawTopView, 30);
+}
+
+// ===================== MODAL HELPERS =====================
+function openModal(id) {
+  document.getElementById(id).classList.add('show');
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove('show');
+}
+
+// ===================== LOADING =====================
+function showLoading(msg) {
+  document.getElementById('loadingMsg').textContent = msg || '處理中...';
+  document.getElementById('loadingOverlay').classList.add('show');
+}
+
+function hideLoading() {
+  document.getElementById('loadingOverlay').classList.remove('show');
+}
+
+// ===================== LOCALSTORAGE =====================
+function autoSave() {
+  if (items.length === 0) return;
+  const sid = getShipmentId();
+  if (!sid) return;
+
+  const records = getRecords();
+  const now = new Date().toISOString();
+  const record = {
+    id: sid + '_' + Date.now(),
+    shipmentId: sid,
+    date: now,
+    cont,
+    items: JSON.parse(JSON.stringify(items)),
+    volRate: result ? result.volRate : null,
+  };
+
+  // Remove duplicate shipment ID
+  const filtered = records.filter(r => r.shipmentId !== sid);
+  filtered.unshift(record);
+  const trimmed = filtered.slice(0, MAX_RECORDS);
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed));
+  } catch(e) {
+    console.warn('LocalStorage save failed:', e);
+  }
+
+  renderHistory();
+}
+
+function getRecords() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function loadRecord(recordId) {
+  const records = getRecords();
+  const rec = records.find(r => r.id === recordId);
+  if (!rec) return;
+
+  items = rec.items || [];
+  rebuildColors();
+  renderItems();
+
+  if (rec.cont) {
+    cont = rec.cont;
+    const tabs = document.querySelectorAll('.ctab');
+    const types = ['20ft', '40ft', '40hc'];
+    types.forEach((t, i) => {
+      if (t === rec.cont) selCont(t, tabs[i]);
+    });
+  }
+
+  if (rec.shipmentId) {
+    document.getElementById('shipmentId').value = rec.shipmentId;
+  }
+}
+
+function renderHistory() {
+  const list = document.getElementById('historyList');
+  const records = getRecords().slice(0, 5);
+
+  if (records.length === 0) {
+    list.innerHTML = '<div class="history-empty">尚無歷史記錄</div>';
+    return;
+  }
+
+  list.innerHTML = records.map(rec => {
+    const d = new Date(rec.date);
+    const dateStr = `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
+    const volStr = rec.volRate ? (rec.volRate * 100).toFixed(0) + '%' : '—';
+    const contLabel = CONTS[rec.cont]?.label || rec.cont;
+    return `<div class="history-item" onclick="loadRecord('${rec.id}')">
+      <div class="history-item-left">
+        <div class="history-shipment">${rec.shipmentId || '(無代號)'}</div>
+        <div class="history-meta">${dateStr} · ${contLabel} · ${rec.items?.length || 0} 品項</div>
+      </div>
+      <div class="history-rate">${volStr}</div>
+    </div>`;
+  }).join('');
+}
+
+function backupAll() {
+  const records = getRecords();
+  const d = new Date();
+  const dateStr = `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  const blob = new Blob([JSON.stringify(records, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `cargo_backup_${dateStr}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function triggerRestore() {
+  document.getElementById('restoreInput').click();
+}
+
+function restoreBackup(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const records = JSON.parse(e.target.result);
+      if (!Array.isArray(records)) throw new Error('格式錯誤');
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(records.slice(0, MAX_RECORDS)));
+      renderHistory();
+      alert(`已還原 ${records.length} 筆記錄`);
+    } catch(err) {
+      alert('還原失敗：' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  input.value = '';
+}
+
+function getShipmentId() {
+  return document.getElementById('shipmentId').value.trim();
+}
+
+// ===================== DRAG & DROP =====================
+function initDragDrop() {
+  const zone = document.getElementById('dropZone');
+
+  zone.addEventListener('dragover', e => {
+    e.preventDefault();
+    zone.classList.add('drag-over');
+  });
+
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const input = document.getElementById('fileInput');
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    input.files = dt.files;
+    handleFile(input);
+  });
+}
+
+// ===================== RESIZE =====================
+function handleResize() {
+  if (result) {
+    drawFrontView();
+    drawTopView();
+  }
+
+  if (is3DInit && renderer) {
+    const wrap = document.getElementById('view3dWrap');
+    if (wrap.clientWidth > 0 && wrap.clientHeight > 0) {
+      renderer.setSize(wrap.clientWidth, wrap.clientHeight);
+      if (camera) {
+        camera.aspect = wrap.clientWidth / wrap.clientHeight;
+        camera.updateProjectionMatrix();
+      }
+      if (is3DEnabled && result) render3D();
+    }
+  }
+}
+
+// ===================== INIT =====================
+document.addEventListener('DOMContentLoaded', () => {
+  renderHistory();
+  selCont('20ft', document.querySelectorAll('.ctab')[0]);
+  initDragDrop();
+
+  window.addEventListener('resize', handleResize);
+
+  // Close modals on overlay click for sheet modal
+  document.getElementById('sheetModal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal('sheetModal');
+  });
+  document.getElementById('colMapModal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal('colMapModal');
+  });
+});
+</script>
+</body>
+</html>
