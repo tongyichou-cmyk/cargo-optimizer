@@ -1759,88 +1759,48 @@ function calculate() {
 }
 
 // ===================== EXTREME POINT PACKING =====================
-function packEP(itemList, contSpec, contKey) {
-  const { l: CL, w: CW, h: CH, maxWt } = contSpec;
 
-  // Expand items
-  const allBoxes = [];
-  itemList.forEach(it => {
-    for (let i = 0; i < it.qty; i++) {
-      allBoxes.push({
-        ...it,
-        id: it.id + '_' + i,
-        origId: it.id,
-      });
-    }
-  });
-
-  // Sort
-  allBoxes.sort((a, b) => {
-    if (a.stack !== b.stack) return a.stack === 'no' ? -1 : 1;
-    const va = String(a.vendor || 'A').toUpperCase();
-    const vb = String(b.vendor || 'A').toUpperCase();
-    if (va !== vb) return va.localeCompare(vb);
-    if (b.wt !== a.wt) return b.wt - a.wt;
-    return (b.l * b.w * b.h) - (a.l * a.w * a.h);
-  });
-
+// Pack a list of boxes within x range [xMin, xMax], appending to placedAll.
+// Returns { placed, unplaced, totalWt } (zoneWt mutated in place).
+function packEPRange(boxes, placedAll, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, xMin, xMax) {
   const placed = [];
   const unplaced = [];
-  let totalWt = 0;
+  let eps = [{ x: xMin, y: 0, z: 0 }];
 
-  // Extreme points
-  let eps = [{ x: 0, y: 0, z: 0 }];
-
-  // Weight zones (3 zones along length)
-  const zoneWt = [0, 0, 0];
-  const zoneL = CL / 3;
-  const maxZoneWt = maxWt * 0.6;
-
-  for (const box of allBoxes) {
-    // Generate rotations based on dir
+  for (const box of boxes) {
     const rotations = getRotations(box);
     let best = null;
     let bestScore = Infinity;
 
     for (const ep of eps) {
       for (const rot of rotations) {
-        const { bx, by, bz, bw, bh, bl } = rot;
+        const { bl, bh, bw } = rot;
         const x = ep.x, y = ep.y, z = ep.z;
 
-        // Bounds check
-        if (x + bl > CL + 0.001) continue;
+        if (x < xMin - 0.001) continue;
+        if (x + bl > xMax + 0.001) continue;
         if (z + bw > CW + 0.001) continue;
         if (y + bh > CH + 0.001) continue;
-
-        // Weight check
         if (totalWt + box.wt > maxWt) continue;
 
-        // Zone weight check
         const zoneIdx = Math.min(2, Math.floor(x / zoneL));
         if (zoneWt[zoneIdx] + box.wt > maxZoneWt) continue;
 
-        // Overlap check
-        if (hasOverlap(placed, x, y, z, bl, bh, bw)) continue;
+        const allPlaced = placedAll.concat(placed);
+        if (hasOverlap(allPlaced, x, y, z, bl, bh, bw)) continue;
+        if (y > 0.001 && !isSupported(allPlaced, x, y, z, bl, bw)) continue;
 
-        // Support check (for y > 0)
-        if (y > 0.001 && !isSupported(placed, x, y, z, bl, bw)) continue;
-
-        // Stack check
         if (y > 0.001) {
-          const below = getBoxesBelow(placed, x, y, z, bl, bw);
+          const below = getBoxesBelow(allPlaced, x, y, z, bl, bw);
           if (below.some(b => b.stack === 'no')) continue;
           if (below.some(b => b.stack === 'yes' && b.maxStack !== undefined)) {
             const maxH = Math.max(...below.filter(b => b.stack === 'yes').map(b => b.maxStack || 99));
-            const stackHeight = getStackHeight(placed, x, z, bl, bw);
-            if (stackHeight >= maxH) continue;
+            if (getStackHeight(allPlaced, x, z, bl, bw) >= maxH) continue;
           }
         }
 
         const score = y * 1e10 + x * 1e5 + z;
-        if (score < bestScore) {
-          bestScore = score;
-          best = { x, y, z, bl, bh, bw };
-        }
+        if (score < bestScore) { bestScore = score; best = { x, y, z, bl, bh, bw }; }
       }
     }
 
@@ -1848,37 +1808,122 @@ function packEP(itemList, contSpec, contKey) {
       const zoneIdx = Math.min(2, Math.floor(best.x / zoneL));
       zoneWt[zoneIdx] += box.wt;
       totalWt += box.wt;
-      placed.push({
-        ...box,
-        px: best.x, py: best.y, pz: best.z,
-        pl: best.bl, ph: best.bh, pw: best.bw,
-      });
+      placed.push({ ...box, px: best.x, py: best.y, pz: best.z, pl: best.bl, ph: best.bh, pw: best.bw });
 
-      // Add extreme points
-      const newEps = [
-        { x: best.x + best.bl, y: best.y, z: best.z },
-        { x: best.x, y: best.y + best.bh, z: best.z },
-        { x: best.x, y: best.y, z: best.z + best.bw },
-      ];
-
-      newEps.forEach(ep => {
-        if (ep.x <= CL && ep.y <= CH && ep.z <= CW) {
-          if (!eps.some(e => Math.abs(e.x - ep.x) < 0.1 && Math.abs(e.y - ep.y) < 0.1 && Math.abs(e.z - ep.z) < 0.1)) {
+      [
+        { x: best.x + best.bl, y: best.y,        z: best.z        },
+        { x: best.x,           y: best.y + best.bh, z: best.z      },
+        { x: best.x,           y: best.y,        z: best.z + best.bw },
+      ].forEach(ep => {
+        if (ep.x <= xMax && ep.y <= CH && ep.z <= CW) {
+          if (!eps.some(e => Math.abs(e.x-ep.x)<0.1 && Math.abs(e.y-ep.y)<0.1 && Math.abs(e.z-ep.z)<0.1))
             eps.push(ep);
-          }
         }
       });
     } else {
       unplaced.push(box);
     }
   }
+  return { placed, unplaced, totalWt };
+}
 
+function packEP(itemList, contSpec, contKey) {
+  const { l: CL, w: CW, h: CH, maxWt } = contSpec;
+  const zoneWt = [0, 0, 0];
+  const zoneL = CL / 3;
+  const maxZoneWt = maxWt * 0.6;
+
+  // --- Step 1: group by vendor, compute zone boundaries by volume ratio ---
+  const vendorOrder = [];
+  const vendorBoxes = {};
+  const vendorVol = {};
+
+  // no-stack items go first, then sort vendors alphabetically
+  const noStackItems = itemList.filter(it => it.stack === 'no');
+  const stackItems   = itemList.filter(it => it.stack !== 'no');
+
+  // collect vendors in alphabetical order
+  stackItems.forEach(it => {
+    const v = String(it.vendor || 'A').toUpperCase();
+    if (!vendorBoxes[v]) { vendorBoxes[v] = []; vendorVol[v] = 0; vendorOrder.push(v); }
+    for (let i = 0; i < it.qty; i++) {
+      vendorBoxes[v].push({ ...it, id: it.id + '_' + i, origId: it.id });
+    }
+    vendorVol[v] += it.qty * it.l * it.w * it.h;
+  });
+  vendorOrder.sort();
+
+  // Expand no-stack items
+  const noStackBoxes = [];
+  noStackItems.forEach(it => {
+    for (let i = 0; i < it.qty; i++)
+      noStackBoxes.push({ ...it, id: it.id + '_' + i, origId: it.id });
+  });
+
+  // Within each vendor: sort by qty-of-that-sku descending (most boxes first), then weight desc
+  const skuQty = {};
+  itemList.forEach(it => { skuQty[it.id] = it.qty; });
+  vendorOrder.forEach(v => {
+    vendorBoxes[v].sort((a, b) => {
+      const qa = skuQty[a.origId] || 0, qb = skuQty[b.origId] || 0;
+      if (qb !== qa) return qb - qa;
+      if (b.wt !== a.wt) return b.wt - a.wt;
+      return (b.l*b.w*b.h) - (a.l*a.w*a.h);
+    });
+  });
+
+  // Compute zone x boundaries (proportional to volume, 5% buffer per vendor except last)
+  const totalVol = vendorOrder.reduce((s, v) => s + vendorVol[v], 0);
+  const xBounds = {}; // { vendor: [xMin, xMax] }
+  let xCur = 0;
+  vendorOrder.forEach((v, i) => {
+    if (i === vendorOrder.length - 1) {
+      xBounds[v] = [xCur, CL];
+    } else {
+      const ratio = vendorVol[v] / totalVol;
+      const len = Math.ceil(CL * ratio * 1.05); // 5% buffer
+      xBounds[v] = [xCur, Math.min(xCur + len, CL)];
+      xCur = xBounds[v][1];
+    }
+  });
+
+  // --- Step 2: pack no-stack first across full container ---
+  noStackBoxes.sort((a, b) => (b.wt - a.wt) || ((b.l*b.w*b.h) - (a.l*a.w*a.h)));
+  let allPlaced = [];
+  let leftover = [];
+  let totalWt = 0;
+
+  if (noStackBoxes.length) {
+    const r = packEPRange(noStackBoxes, allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, 0, CL);
+    allPlaced = allPlaced.concat(r.placed);
+    leftover = leftover.concat(r.unplaced);
+    totalWt = r.totalWt;
+  }
+
+  // --- Step 3: pack each vendor in its zone ---
+  const vendorLeftover = [];
+  vendorOrder.forEach(v => {
+    const [xMin, xMax] = xBounds[v];
+    const r = packEPRange(vendorBoxes[v], allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, xMin, xMax);
+    allPlaced = allPlaced.concat(r.placed);
+    vendorLeftover.push(...r.unplaced);
+    totalWt = r.totalWt;
+  });
+
+  // --- Step 4: cleanup pass — place leftovers anywhere in full container ---
+  if (vendorLeftover.length) {
+    const r = packEPRange(vendorLeftover, allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, 0, CL);
+    allPlaced = allPlaced.concat(r.placed);
+    leftover = leftover.concat(r.unplaced);
+    totalWt = r.totalWt;
+  }
+
+  const placed = allPlaced;
+  const unplaced = leftover;
   const usedVol = placed.reduce((s, b) => s + b.pl * b.ph * b.pw, 0);
   const contVol = CL * CW * CH;
-  const volRate = usedVol / contVol;
-  const wtRate = totalWt / maxWt;
 
-  return { placed, unplaced, totalWt, usedVol, volRate, wtRate, contKey, contSpec };
+  return { placed, unplaced, totalWt, usedVol, volRate: usedVol/contVol, wtRate: totalWt/maxWt, contKey, contSpec };
 }
 
 function getRotations(box) {
