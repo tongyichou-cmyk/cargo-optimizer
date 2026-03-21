@@ -1470,7 +1470,11 @@ function processParsedData(data) {
   const nextRow = data[headerRowIdx + 1] || [];
   nextRow.forEach((cell, idx) => {
     const sub = String(cell || '').trim();
-    if (sub && !headers[idx]) headers[idx] = sub;
+    if (!sub) return;
+    const subLower = sub.toLowerCase();
+    // Prefer sub-header if it matches a keyword (more specific than merged category header)
+    const matchesKeyword = allKeywords.some(kw => subLower.includes(kw));
+    if (!headers[idx] || matchesKeyword) headers[idx] = sub;
   });
 
   // Detect if next row is a sub-header row (has keyword matches but mostly empty)
