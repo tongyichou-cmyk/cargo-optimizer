@@ -1612,7 +1612,7 @@ function confirmImport() {
       const dir = mapping.dir !== undefined ? String(row[mapping.dir] || 'free').toLowerCase() : 'free';
       const stackRaw = mapping.stack !== undefined ? String(row[mapping.stack] || 'yes').toLowerCase() : 'yes';
       const stack = stackRaw.includes('no') || stackRaw === '否' || stackRaw === 'false' ? 'no' : 'yes';
-      const maxStack = mapping.maxStack !== undefined ? (parseInt(row[mapping.maxStack]) || 3) : 3;
+      const maxStack = mapping.maxStack !== undefined ? (parseInt(row[mapping.maxStack]) || 5) : 5;
 
       const key = `${vendor}|${article}|${name}|${l}|${w}|${h}|${wt}`;
       if (groups[key]) {
@@ -1762,10 +1762,18 @@ function calculate() {
 
 // Pack a list of boxes within x range [xMin, xMax], appending to placedAll.
 // Returns { placed, unplaced, totalWt } (zoneWt mutated in place).
-function packEPRange(boxes, placedAll, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, xMin, xMax) {
+function packEPRange(boxes, placedAll, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, xMin, xMax, seedEps) {
   const placed = [];
   const unplaced = [];
-  let eps = [{ x: xMin, y: 0, z: 0 }];
+
+  // Seed EPs: use provided seedEps (for cleanup pass), or start fresh at zone origin
+  let eps;
+  if (seedEps && seedEps.length) {
+    eps = seedEps.filter(e => e.x >= xMin - 0.001 && e.x <= xMax && e.y <= CH && e.z <= CW);
+    if (!eps.length) eps = [{ x: xMin, y: 0, z: 0 }];
+  } else {
+    eps = [{ x: xMin, y: 0, z: 0 }];
+  }
 
   for (const box of boxes) {
     const rotations = getRotations(box);
@@ -1799,7 +1807,7 @@ function packEPRange(boxes, placedAll, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW
           }
         }
 
-        const score = y * 1e10 + x * 1e5 + z;
+        const score = x * 1e10 + y * 1e5 + z;
         if (score < bestScore) { bestScore = score; best = { x, y, z, bl, bh, bw }; }
       }
     }
@@ -1881,7 +1889,7 @@ function packEP(itemList, contSpec, contKey) {
       xBounds[v] = [xCur, CL];
     } else {
       const ratio = vendorVol[v] / totalVol;
-      const len = Math.ceil(CL * ratio * 1.05); // 5% buffer
+      const len = Math.ceil(CL * ratio * 1.05); // 5% buffer; last vendor gets remainder
       xBounds[v] = [xCur, Math.min(xCur + len, CL)];
       xCur = xBounds[v][1];
     }
@@ -1901,22 +1909,43 @@ function packEP(itemList, contSpec, contKey) {
   }
 
   // --- Step 3: pack each vendor in its zone ---
-  const vendorLeftover = [];
+  const vendorLeftover = {};
   vendorOrder.forEach(v => {
     const [xMin, xMax] = xBounds[v];
     const r = packEPRange(vendorBoxes[v], allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, xMin, xMax);
     allPlaced = allPlaced.concat(r.placed);
-    vendorLeftover.push(...r.unplaced);
+    vendorLeftover[v] = r.unplaced;
     totalWt = r.totalWt;
   });
 
-  // --- Step 4: cleanup pass — place leftovers anywhere in full container ---
-  if (vendorLeftover.length) {
-    const r = packEPRange(vendorLeftover, allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, 0, CL);
+  // --- Step 4: per-vendor cleanup — fill gaps within each vendor's zone ---
+  const mkEps = (placed) => {
+    const eps = [];
+    placed.forEach(b => {
+      [
+        { x: b.px + b.pl, y: b.py,        z: b.pz        },
+        { x: b.px,        y: b.py + b.ph,  z: b.pz        },
+        { x: b.px,        y: b.py,          z: b.pz + b.pw },
+      ].forEach(ep => {
+        if (ep.x <= CL && ep.y <= CH && ep.z <= CW &&
+            !eps.some(e => Math.abs(e.x-ep.x)<0.1 && Math.abs(e.y-ep.y)<0.1 && Math.abs(e.z-ep.z)<0.1))
+          eps.push(ep);
+      });
+    });
+    return eps;
+  };
+
+  vendorOrder.forEach(v => {
+    if (!vendorLeftover[v].length) return;
+    const [xMin, xMax] = xBounds[v];
+    const r = packEPRange(vendorLeftover[v], allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, xMin, xMax, mkEps(allPlaced));
     allPlaced = allPlaced.concat(r.placed);
-    leftover = leftover.concat(r.unplaced);
+    vendorLeftover[v] = r.unplaced;
     totalWt = r.totalWt;
-  }
+  });
+
+  // Collect any remaining unplaced (vendor zones took priority; we don't mix zones)
+  leftover = leftover.concat(vendorOrder.flatMap(v => vendorLeftover[v]));
 
   const placed = allPlaced;
   const unplaced = leftover;
