@@ -245,19 +245,13 @@ function packEP(itemList, contSpec) {
   const totalVol = vendorOrder.reduce((s,v) => s+vendorVol[v], 0);
   const xBounds = {};
   let xCur = 0;
-  // Reserve minimum zone for last vendor; give remainder to earlier vendors proportionally.
-  // Zone allocation uses CL (full container) to preserve original zone sizing;
-  // effL (door clearance) is enforced as the hard placement boundary.
-  const lastV = vendorOrder.length ? vendorOrder[vendorOrder.length - 1] : null;
-  const lastMinZone = lastV ? computeMinZone(vendorBoxes[lastV], CW, CH) : 0;
-  const availableForNonLast = Math.max(0, CL - lastMinZone);
-  const nonLastVol = vendorOrder.slice(0, -1).reduce((s, v) => s + vendorVol[v], 0);
+  // Zone allocation: volume-proportional with 1.05 buffer for non-last vendors.
+  // Last vendor gets whatever remains up to CL. This keeps non-last zones compact
+  // so the last vendor's packing naturally ends before CL, leaving door clearance.
   vendorOrder.forEach((v, i) => {
     if (i === vendorOrder.length-1) { xBounds[v] = [xCur, CL]; }
     else {
-      const len = nonLastVol > 0
-        ? Math.ceil(availableForNonLast * (vendorVol[v] / nonLastVol))
-        : Math.ceil(CL * (vendorVol[v]/totalVol) * 1.05);
+      const len = Math.ceil(CL * (vendorVol[v]/totalVol) * 1.05);
       xBounds[v] = [xCur, Math.min(xCur+len, CL)];
       xCur = xBounds[v][1];
     }
