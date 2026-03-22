@@ -1218,6 +1218,7 @@
       </div>
       <div class="report-scroll report-hidden" id="reportContent">
         <div class="stats-grid" id="statsGrid"></div>
+        <div id="doorClearanceWrap" style="padding:6px 0 4px;font-size:13px;font-weight:500;"></div>
         <div class="progress-bar-wrap" id="progressWrap"></div>
         <div class="report-table-wrap" id="loadedTableWrap"></div>
         <div class="report-table-wrap report-hidden" id="unloadedTableWrap"></div>
@@ -1900,8 +1901,6 @@ function packBruteForce(boxes, placedAll, totalWt, zoneWt, zoneL, maxZoneWt, CL,
 
 function packEP(itemList, contSpec, contKey) {
   const { l: CL, w: CW, h: CH, maxWt } = contSpec;
-  const DOOR_CLEARANCE = contSpec.doorClearance ?? 15; // cm reserved near doors
-  const effL = CL - DOOR_CLEARANCE;                    // effective packing length
   const zoneWt = [0, 0, 0];
   const zoneL = CL / 3;
   const maxZoneWt = maxWt * 0.6;
@@ -1955,12 +1954,12 @@ function packEP(itemList, contSpec, contKey) {
   const nonLastVol = vendorOrder.slice(0, -1).reduce((s, v) => s + vendorVol[v], 0);
   vendorOrder.forEach((v, i) => {
     if (i === vendorOrder.length - 1) {
-      xBounds[v] = [xCur, effL];
+      xBounds[v] = [xCur, CL];
     } else {
       const len = nonLastVol > 0
         ? Math.ceil(availableForNonLast * (vendorVol[v] / nonLastVol))
         : Math.ceil(CL * (vendorVol[v]/totalVol) * 1.05);
-      xBounds[v] = [xCur, Math.min(xCur + len, effL)];
+      xBounds[v] = [xCur, Math.min(xCur + len, CL)];
       xCur = xBounds[v][1];
     }
   });
@@ -1973,7 +1972,7 @@ function packEP(itemList, contSpec, contKey) {
         { x: b.px,        y: b.py + b.ph,  z: b.pz        },
         { x: b.px,        y: b.py,          z: b.pz + b.pw },
       ].forEach(ep => {
-        if (ep.x <= effL && ep.y <= CH && ep.z <= CW &&
+        if (ep.x <= CL && ep.y <= CH && ep.z <= CW &&
             !eps.some(e => Math.abs(e.x-ep.x)<0.1 && Math.abs(e.y-ep.y)<0.1 && Math.abs(e.z-ep.z)<0.1))
           eps.push(ep);
       });
@@ -1988,7 +1987,7 @@ function packEP(itemList, contSpec, contKey) {
   let totalWt = 0;
 
   if (noStackBoxes.length) {
-    const r = packEPRange(noStackBoxes, allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, 0, effL);
+    const r = packEPRange(noStackBoxes, allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, 0, CL);
     allPlaced = allPlaced.concat(r.placed);
     leftover = leftover.concat(r.unplaced);
     totalWt = r.totalWt;
@@ -2039,21 +2038,16 @@ function packEP(itemList, contSpec, contKey) {
     totalWt = r.totalWt;
   });
 
-  // --- Step 6: cross-zone overflow — place any remaining boxes anywhere in [0, effL] ---
-  const allVendorLeftover = vendorOrder.flatMap(v => vendorLeftover[v]);
-  if (allVendorLeftover.length) {
-    const r = packBruteForce(allVendorLeftover, allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, 0, effL);
-    allPlaced = allPlaced.concat(r.placed);
-    totalWt = r.totalWt;
-    leftover = leftover.concat(r.unplaced);
-  }
+  leftover = leftover.concat(vendorOrder.flatMap(v => vendorLeftover[v]));
 
   const placed = allPlaced;
   const unplaced = leftover;
   const usedVol = placed.reduce((s, b) => s + b.pl * b.ph * b.pw, 0);
   const contVol = CL * CW * CH;
+  const maxX = placed.length ? Math.max(...placed.map(b => b.px + b.pl)) : 0;
+  const doorClearance = Math.max(0, CL - maxX);
 
-  return { placed, unplaced, totalWt, usedVol, volRate: usedVol/contVol, wtRate: totalWt/maxWt, contKey, contSpec };
+  return { placed, unplaced, totalWt, usedVol, volRate: usedVol/contVol, wtRate: totalWt/maxWt, doorClearance, contKey, contSpec };
 }
 
 function getRotations(box) {
@@ -2213,26 +2207,47 @@ function drawFrontView() {
   ctx.lineWidth = 2.5;
   ctx.strokeRect(PAD_L, PAD_T, contW, contH);
 
-  // Door clearance zone (red hatched zone at door end)
-  const doorClear2D = contSpec.doorClearance ?? 15;
-  if (doorClear2D > 0) {
-    const dcW = doorClear2D * scale;
-    const dcX = PAD_L + (CL - doorClear2D) * scale;
-    ctx.fillStyle = 'rgba(255,50,50,0.10)';
+  // Door clearance zone (dynamic, based on actual packing end)
+  const doorClearance2D = result.doorClearance ?? 0;
+  if (doorClearance2D >= 2) {
+    const dcColor = doorClearance2D >= 10 ? 'rgba(0,200,0,0.15)' : doorClearance2D >= 5 ? 'rgba(255,180,0,0.15)' : 'rgba(255,50,50,0.15)';
+    const dcStroke = doorClearance2D >= 10 ? 'rgba(0,200,0,0.6)' : doorClearance2D >= 5 ? 'rgba(255,180,0,0.6)' : 'rgba(255,50,50,0.6)';
+    const dcTextColor = doorClearance2D >= 10 ? 'rgba(0,160,0,0.9)' : doorClearance2D >= 5 ? 'rgba(200,120,0,0.9)' : 'rgba(200,0,0,0.9)';
+    const dcW = doorClearance2D * scale;
+    const dcX = PAD_L + (CL - doorClearance2D) * scale;
+    ctx.fillStyle = dcColor;
     ctx.fillRect(dcX, PAD_T, dcW, contH);
-    ctx.strokeStyle = 'rgba(255,50,50,0.5)';
+    ctx.strokeStyle = dcStroke;
     ctx.lineWidth = 1.2;
     ctx.setLineDash([4, 3]);
     ctx.strokeRect(dcX, PAD_T, dcW, contH);
     ctx.setLineDash([]);
-    ctx.fillStyle = 'rgba(255,50,50,0.8)';
+    ctx.fillStyle = dcTextColor;
     ctx.font = 'bold 9px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.save();
     ctx.translate(dcX + dcW / 2, PAD_T + contH / 2);
     ctx.rotate(-Math.PI / 2);
-    ctx.fillText(`門邊預留 ${doorClear2D}cm`, 0, 0);
+    ctx.fillText(`門口預留 ${doorClearance2D.toFixed(0)}cm`, 0, 0);
+    ctx.restore();
+  } else {
+    // Very small clearance: draw a thin red line at x=CL
+    const lineX = PAD_L + CL * scale;
+    ctx.strokeStyle = 'rgba(255,50,50,0.8)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(lineX, PAD_T);
+    ctx.lineTo(lineX, PAD_T + contH);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(200,0,0,0.8)';
+    ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.save();
+    ctx.translate(lineX - 6, PAD_T + contH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('門口預留 0cm', 0, 0);
     ctx.restore();
   }
 
@@ -2418,7 +2433,10 @@ function drawTopView() {
 // ===================== REPORT =====================
 function renderReport() {
   if (!result) return;
-  const { placed, unplaced, totalWt, usedVol, volRate, wtRate, contSpec, contKey } = result;
+  const { placed, unplaced, totalWt, usedVol, volRate, wtRate, doorClearance, contSpec, contKey } = result;
+  const dc = doorClearance ?? 0;
+  const dcColor = dc >= 10 ? '#34C759' : dc >= 5 ? '#FF9500' : '#FF3B30';
+  const dcIcon = dc >= 10 ? '✅' : dc >= 5 ? '⚠️' : '🔴';
 
   // Stats
   const statsGrid = document.getElementById('statsGrid');
@@ -2440,6 +2458,12 @@ function renderReport() {
       <div class="stat-value">${totalWt.toFixed(1)}<span class="stat-unit"> kg</span></div>
     </div>
   `;
+
+  // Door clearance summary
+  const dcWrap = document.getElementById('doorClearanceWrap');
+  if (dcWrap) {
+    dcWrap.innerHTML = `<span style="color:${dcColor}">${dcIcon} 門口預留 ${dc.toFixed(0)} cm（建議 ≥ 10 cm）</span>`;
+  }
 
   // Progress bar
   const progressWrap = document.getElementById('progressWrap');
@@ -2721,17 +2745,19 @@ function render3D() {
   contLine.position.set(cx, cy, cz);
   scene.add(contLine);
 
-  // Door clearance zone (semi-transparent red region near door end)
-  const doorClear = contSpec.doorClearance ?? 15;
-  const effL3D = CL - doorClear;
-  if (doorClear > 0) {
-    const dcGeo = new THREE.BoxGeometry(doorClear, CH, CW);
-    const dcMat = new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0.15, depthWrite: false });
+  // Door clearance zone (dynamic, based on actual packing end)
+  const doorClearance3D = result.doorClearance ?? 0;
+  if (doorClearance3D > 0.5) {
+    const dcColor3D = doorClearance3D >= 10 ? 0x00cc00 : doorClearance3D >= 5 ? 0xffaa00 : 0xff2222;
+    const dcEdgeColor3D = doorClearance3D >= 10 ? 0x00aa00 : doorClearance3D >= 5 ? 0xdd8800 : 0xff4444;
+    const dcStartX = CL - doorClearance3D;
+    const dcGeo = new THREE.BoxGeometry(doorClearance3D, CH, CW);
+    const dcMat = new THREE.MeshBasicMaterial({ color: dcColor3D, transparent: true, opacity: 0.15, depthWrite: false });
     const dcMesh = new THREE.Mesh(dcGeo, dcMat);
-    dcMesh.position.set(effL3D + doorClear / 2, cy, cz);
+    dcMesh.position.set(dcStartX + doorClearance3D / 2, cy, cz);
     scene.add(dcMesh);
     const dcEdges = new THREE.EdgesGeometry(dcGeo);
-    const dcLine = new THREE.LineSegments(dcEdges, new THREE.LineBasicMaterial({ color: 0xff4444, linewidth: 1 }));
+    const dcLine = new THREE.LineSegments(dcEdges, new THREE.LineBasicMaterial({ color: dcEdgeColor3D, linewidth: 1 }));
     dcLine.position.copy(dcMesh.position);
     scene.add(dcLine);
   }

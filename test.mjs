@@ -215,8 +215,6 @@ function packBruteForce(boxes, placedAll, totalWt, zoneWt, zoneL, maxZoneWt, CL,
 
 function packEP(itemList, contSpec) {
   const { l: CL, w: CW, h: CH, maxWt } = contSpec;
-  const DOOR_CLEARANCE = contSpec.doorClearance ?? 15; // cm reserved near doors
-  const effL = CL - DOOR_CLEARANCE;                    // effective packing length
   const zoneWt = [0, 0, 0], zoneL = CL / 3, maxZoneWt = maxWt * 0.6;
 
   const noStackItems = itemList.filter(it => it.stack === 'no');
@@ -255,12 +253,12 @@ function packEP(itemList, contSpec) {
   const availableForNonLast = Math.max(0, CL - lastMinZone);
   const nonLastVol = vendorOrder.slice(0, -1).reduce((s, v) => s + vendorVol[v], 0);
   vendorOrder.forEach((v, i) => {
-    if (i === vendorOrder.length-1) { xBounds[v] = [xCur, effL]; }
+    if (i === vendorOrder.length-1) { xBounds[v] = [xCur, CL]; }
     else {
       const len = nonLastVol > 0
         ? Math.ceil(availableForNonLast * (vendorVol[v] / nonLastVol))
         : Math.ceil(CL * (vendorVol[v]/totalVol) * 1.05);
-      xBounds[v] = [xCur, Math.min(xCur+len, effL)];
+      xBounds[v] = [xCur, Math.min(xCur+len, CL)];
       xCur = xBounds[v][1];
     }
   });
@@ -270,7 +268,7 @@ function packEP(itemList, contSpec) {
     placed.forEach(b => {
       [{ x:b.px+b.pl,y:b.py,z:b.pz },{ x:b.px,y:b.py+b.ph,z:b.pz },{ x:b.px,y:b.py,z:b.pz+b.pw }]
       .forEach(ep => {
-        if (ep.x<=effL && ep.y<=CH && ep.z<=CW &&
+        if (ep.x<=CL && ep.y<=CH && ep.z<=CW &&
             !eps.some(e=>Math.abs(e.x-ep.x)<0.1&&Math.abs(e.y-ep.y)<0.1&&Math.abs(e.z-ep.z)<0.1))
           eps.push(ep);
       });
@@ -281,7 +279,7 @@ function packEP(itemList, contSpec) {
   let allPlaced = [], leftover = [], totalWt = 0;
   if (noStackBoxes.length) {
     noStackBoxes.sort((a,b)=>(b.wt-a.wt)||((b.l*b.w*b.h)-(a.l*a.w*a.h)));
-    const r = packEPRange(noStackBoxes, allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, 0, effL);
+    const r = packEPRange(noStackBoxes, allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, 0, CL);
     allPlaced = allPlaced.concat(r.placed); leftover = leftover.concat(r.unplaced); totalWt = r.totalWt;
   }
 
@@ -325,19 +323,14 @@ function packEP(itemList, contSpec) {
     allPlaced = allPlaced.concat(r.placed); vendorLeftover[v] = r.unplaced; totalWt = r.totalWt;
   });
 
-  // Cross-zone overflow: if any boxes still unplaced after vendor-specific passes,
-  // allow them to fill gaps anywhere in [0, effL] (zone boundary is a soft limit)
-  const allVendorLeftover = vendorOrder.flatMap(v => vendorLeftover[v]);
-  if (allVendorLeftover.length) {
-    const r = packBruteForce(allVendorLeftover, allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, 0, effL);
-    allPlaced = allPlaced.concat(r.placed); totalWt = r.totalWt;
-    leftover = leftover.concat(r.unplaced);
-  }
+  leftover = leftover.concat(vendorOrder.flatMap(v => vendorLeftover[v]));
 
   const placed = allPlaced, unplaced = leftover;
   const usedVol = placed.reduce((s,b) => s+b.pl*b.ph*b.pw, 0);
   const contVol = CL * CW * CH;
-  return { placed, unplaced, totalWt, usedVol, volRate: usedVol/contVol, wtRate: totalWt/maxWt };
+  const maxX = placed.length ? Math.max(...placed.map(b => b.px + b.pl)) : 0;
+  const doorClearance = Math.max(0, CL - maxX);
+  return { placed, unplaced, totalWt, usedVol, volRate: usedVol/contVol, wtRate: totalWt/maxWt, doorClearance };
 }
 
 // ─── Test runner ───
@@ -677,7 +670,7 @@ test('real data: all 729 cartons placed (or ≥97%)', () => {
   const total = realResult.placed.length + realResult.unplaced.length;
   assert.equal(total, 729, 'total should be 729');
   const rate = realResult.placed.length / 729;
-  assert.ok(rate >= 0.998, `placed rate ${(rate*100).toFixed(1)}% below 99.8% threshold`);
+  assert.ok(rate >= 1.0, `placed rate ${(rate*100).toFixed(1)}% below 100% threshold`);
   console.log(`     → placed ${realResult.placed.length}/729 (${(rate*100).toFixed(1)}%)  vol=${( realResult.volRate*100).toFixed(1)}%`);
 });
 
@@ -687,12 +680,8 @@ test('real data: vendor A boxes placed before vendor B (zone grouping)', () => {
   assert.ok(aBoxes.length > 0, 'should have A boxes placed');
   assert.ok(bBoxes.length > 0, 'should have B boxes placed');
   const aMaxX = Math.max(...aBoxes.map(b => b.px + b.pl));
-  // Use 5th-percentile B x to tolerate cross-zone overflow boxes (door clearance can
-  // push a small fraction of B boxes into A zone to maximise overall placement rate)
-  const sortedBPx = bBoxes.map(b => b.px).sort((a,b) => a-b);
-  const bEffMinX = sortedBPx[Math.floor(sortedBPx.length * 0.05)];
-  // A's rightmost edge should be ≤ B's 5th-percentile start (100cm tolerance for cleanup overlap)
-  assert.ok(aMaxX <= bEffMinX + 100, `A max-x ${aMaxX.toFixed(0)} should be ≤ B p5-x ${bEffMinX.toFixed(0)} (+100cm tolerance)`);
+  const bMinX = Math.min(...bBoxes.map(b => b.px));
+  assert.ok(aMaxX <= bMinX + 100, `A max-x ${aMaxX.toFixed(0)} should be ≤ B min-x ${bMinX.toFixed(0)} (+100cm tolerance)`);
 });
 
 test('real data: no overlaps in placed boxes', () => {
@@ -712,6 +701,12 @@ test('real data: no overlaps in placed boxes', () => {
 
 test('real data: weight within limit', () => {
   assert.ok(realResult.totalWt <= c40hc.maxWt, `weight ${realResult.totalWt} exceeds limit ${c40hc.maxWt}`);
+});
+
+test('real data: door clearance reported correctly', () => {
+  assert.ok(typeof realResult.doorClearance === 'number', 'doorClearance should be a number');
+  assert.ok(realResult.doorClearance >= 0, 'doorClearance should be non-negative');
+  console.log(`     → 實際門口預留: ${realResult.doorClearance.toFixed(1)} cm (建議 ≥ 10cm)`);
 });
 
 // ══════════════════════════════════════════════
