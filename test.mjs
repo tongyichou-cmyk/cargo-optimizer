@@ -9,7 +9,7 @@ import assert from 'assert/strict';
 const CONTS = {
   '20ft': { name:'20呎標準櫃', l:589,  w:235, h:239, maxWt:28000 },
   '40ft': { name:'40呎標準櫃', l:1200, w:235, h:239, maxWt:26500 },
-  '40hc': { name:'40呎高櫃',   l:1200, w:235, h:269, maxWt:26500 },
+  '40hc': { name:'40呎高櫃',   l:1203, w:235, h:269, maxWt:26500 },
 };
 
 const VENDOR_PALETTES = {
@@ -266,25 +266,22 @@ function packEP(itemList, contSpec) {
   // Zone allocation: packEnd = CL - 10 guarantees ≥10cm door clearance.
   // Post-processing gap shift transfers any inter-vendor gap to door clearance.
   //
-  // maxNonLastEnd restricts non-last vendors to leave room for the last vendor.
-  // computeMinZone is accurate for single-SKU vendors but overestimates for multi-SKU vendors
-  // (it sums per-SKU minimum zones independently, ignoring interleaving).
-  // When lastVMinZone > packEnd it means computeMinZone is overestimating — skip the restriction.
+  // Normal mode (lastVMinZone ≤ packEnd): reserve lastVMinZone for the last vendor.
+  // Non-last vendors get max(volume-proportional-1.05x, computeMinZone(v)).
   //
-  // For non-last vendors: use max(volume-proportional-1.05x, computeMinZone(v)) so each
-  // non-last vendor always gets at least its own minimum required space.
+  // Overflow mode (lastVMinZone > packEnd): total cargo exceeds container — use
+  // volume-proportional zones only (skip computeMinZone boost for non-last vendors)
+  // so every vendor gets a fair share of the available space.
   const packEnd = CL - 10;
   const lastV = vendorOrder.length ? vendorOrder[vendorOrder.length-1] : null;
   const lastVMinZone = lastV ? computeMinZone(vendorBoxes[lastV], CW, CH) : 0;
-  const maxNonLastEnd = (lastVMinZone <= packEnd)
-    ? Math.max(0, packEnd - lastVMinZone)
-    : packEnd;
+  const overflowMode = lastVMinZone > packEnd;
+  const maxNonLastEnd = overflowMode ? packEnd : Math.max(0, packEnd - lastVMinZone);
   vendorOrder.forEach((v, i) => {
     if (i === vendorOrder.length-1) { xBounds[v] = [xCur, packEnd]; }
     else {
       const volLen = Math.ceil(CL * (vendorVol[v]/totalVol) * 1.05);
-      const minLen = computeMinZone(vendorBoxes[v], CW, CH);
-      const len = Math.max(volLen, minLen);
+      const len = overflowMode ? volLen : Math.max(volLen, computeMinZone(vendorBoxes[v], CW, CH));
       xBounds[v] = [xCur, Math.min(xCur+len, maxNonLastEnd, packEnd)];
       xCur = xBounds[v][1];
     }
@@ -682,7 +679,7 @@ test('40ft container dimensions correct', () => {
 });
 
 test('40hc high cube dimensions correct', () => {
-  assert.equal(CONTS['40hc'].l, 1200);
+  assert.equal(CONTS['40hc'].l, 1203);
   assert.equal(CONTS['40hc'].w, 235);
   assert.equal(CONTS['40hc'].h, 269);
   assert.equal(CONTS['40hc'].maxWt, 26500);
