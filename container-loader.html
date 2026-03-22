@@ -1964,23 +1964,31 @@ function packEP(itemList, contSpec, contKey) {
     });
   });
 
-  // Zone allocation:
-  // - Non-last vendors: generous volume-proportional (1.05x), capped so last vendor fits within packEnd.
-  // - Last vendor: zone start updated after non-last packing to actual end of placed boxes
-  //   (eliminates inter-vendor gap), zone end = packEnd = CL - TARGET_CLEARANCE (door clearance).
+  // Zone allocation: packEnd = CL - 10 guarantees ≥10cm door clearance.
+  // Post-processing gap shift transfers any inter-vendor gap to door clearance.
+  //
+  // maxNonLastEnd restricts non-last vendors to leave room for the last vendor.
+  // computeMinZone is accurate for single-SKU vendors but overestimates for multi-SKU vendors.
+  // When lastVMinZone > packEnd it means computeMinZone is overestimating — skip the restriction.
+  //
+  // For non-last vendors: use max(volume-proportional-1.05x, computeMinZone(v)) so each
+  // non-last vendor always gets at least its own minimum required space.
   const totalVol = vendorOrder.reduce((s, v) => s + vendorVol[v], 0);
   const xBounds = {};
   let xCur = 0;
-  const TARGET_CLEARANCE = contSpec.targetDoorClearance ?? 15;
-  const packEnd = CL - TARGET_CLEARANCE;
+  const packEnd = CL - 10;
   const lastV = vendorOrder.length ? vendorOrder[vendorOrder.length-1] : null;
   const lastVMinZone = lastV ? computeMinZone(vendorBoxes[lastV], CW, CH) : 0;
-  const maxNonLastEnd = Math.max(0, packEnd - lastVMinZone);  // ensures last vendor fits within packEnd
+  const maxNonLastEnd = (lastVMinZone <= packEnd)
+    ? Math.max(0, packEnd - lastVMinZone)
+    : packEnd;
   vendorOrder.forEach((v, i) => {
     if (i === vendorOrder.length - 1) {
       xBounds[v] = [xCur, packEnd];
     } else {
-      const len = Math.ceil(CL * (vendorVol[v]/totalVol) * 1.05);
+      const volLen = Math.ceil(CL * (vendorVol[v]/totalVol) * 1.05);
+      const minLen = computeMinZone(vendorBoxes[v], CW, CH);
+      const len = Math.max(volLen, minLen);
       xBounds[v] = [xCur, Math.min(xCur + len, maxNonLastEnd, packEnd)];
       xCur = xBounds[v][1];
     }
@@ -2018,7 +2026,7 @@ function packEP(itemList, contSpec, contKey) {
   // --- Step 3: pack each vendor in its zone, SKU by SKU with mini-cleanup between ---
   const vendorLeftover = {};
 
-  const packVendor = v => {
+  vendorOrder.forEach(v => {
     const [xMin, xMax] = xBounds[v];
     const skuMap = {};
     vendorBoxes[v].forEach(b => { if (!skuMap[b.origId]) skuMap[b.origId] = []; skuMap[b.origId].push(b); });
@@ -2039,19 +2047,7 @@ function packEP(itemList, contSpec, contKey) {
       }
     });
     vendorLeftover[v] = vLeftover;
-  };
-
-  // Pack non-last vendors first
-  vendorOrder.slice(0, -1).forEach(v => packVendor(v));
-
-  // Update last vendor's zone start to actual end of placed boxes — eliminates inter-vendor gap
-  if (lastV && vendorOrder.length > 1) {
-    const actualEnd = allPlaced.length ? Math.max(...allPlaced.map(b => b.px + b.pl)) : 0;
-    xBounds[lastV] = [actualEnd, packEnd];
-  }
-
-  // Pack last vendor in its updated zone
-  if (lastV) packVendor(lastV);
+  });
 
   // --- Step 4: per-vendor final cleanup — fill remaining gaps ---
   vendorOrder.forEach(v => {
@@ -2072,6 +2068,19 @@ function packEP(itemList, contSpec, contKey) {
     vendorLeftover[v] = r.unplaced;
     totalWt = r.totalWt;
   });
+
+  // Post-processing: slide last vendor's boxes left to close inter-vendor gap,
+  // transferring that space to door clearance.
+  if (lastV && vendorOrder.length > 1) {
+    const nonLastPlaced = allPlaced.filter(b => String(b.vendor||'A').toUpperCase() !== lastV);
+    const lastPlaced    = allPlaced.filter(b => String(b.vendor||'A').toUpperCase() === lastV);
+    if (nonLastPlaced.length && lastPlaced.length) {
+      const nonLastEnd = Math.max(...nonLastPlaced.map(b => b.px + b.pl));
+      const lastStart  = Math.min(...lastPlaced.map(b => b.px));
+      const gap = lastStart - nonLastEnd;
+      if (gap > 0.1) lastPlaced.forEach(b => { b.px -= gap; });
+    }
+  }
 
   leftover = leftover.concat(vendorOrder.flatMap(v => vendorLeftover[v]));
 
