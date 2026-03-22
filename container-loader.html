@@ -2368,6 +2368,18 @@ function drawFrontView() {
     }
     legendY += 5;
   }
+
+  // Door clearance label in legend
+  if (legendY + 36 < canvasH) legendY = Math.max(legendY, PAD_T + contH - 52);
+  const dc2d = result.doorClearance ?? 0;
+  const dcLabelColor = dc2d >= 10 ? '#34C759' : dc2d >= 5 ? '#FF9500' : '#FF3B30';
+  ctx.font = 'bold 10px sans-serif';
+  ctx.fillStyle = '#6E6E73';
+  ctx.fillText('門口預留', legendX, legendY);
+  legendY += 15;
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillStyle = dcLabelColor;
+  ctx.fillText(`${dc2d.toFixed(1)} cm`, legendX, legendY);
 }
 
 // ===================== TOP VIEW =====================
