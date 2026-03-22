@@ -1964,16 +1964,18 @@ function packEP(itemList, contSpec, contKey) {
     });
   });
 
-  // Zone allocation: cap last vendor at packEnd = CL - TARGET_CLEARANCE (10cm).
-  // EP algorithm stops when boxes would exceed packEnd → actual door clearance ≥ 10cm.
+  // Zone allocation:
+  // - Non-last vendors: generous volume-proportional (1.05x), capped so last vendor fits within packEnd.
+  // - Last vendor: zone start updated after non-last packing to actual end of placed boxes
+  //   (eliminates inter-vendor gap), zone end = packEnd = CL - TARGET_CLEARANCE (door clearance).
   const totalVol = vendorOrder.reduce((s, v) => s + vendorVol[v], 0);
   const xBounds = {};
   let xCur = 0;
-  const TARGET_CLEARANCE = contSpec.targetDoorClearance ?? 10;
+  const TARGET_CLEARANCE = contSpec.targetDoorClearance ?? 15;
   const packEnd = CL - TARGET_CLEARANCE;
   const lastV = vendorOrder.length ? vendorOrder[vendorOrder.length-1] : null;
   const lastVMinZone = lastV ? computeMinZone(vendorBoxes[lastV], CW, CH) : 0;
-  const maxNonLastEnd = Math.max(0, packEnd - lastVMinZone);
+  const maxNonLastEnd = Math.max(0, packEnd - lastVMinZone);  // ensures last vendor fits within packEnd
   vendorOrder.forEach((v, i) => {
     if (i === vendorOrder.length - 1) {
       xBounds[v] = [xCur, packEnd];
@@ -2015,7 +2017,8 @@ function packEP(itemList, contSpec, contKey) {
 
   // --- Step 3: pack each vendor in its zone, SKU by SKU with mini-cleanup between ---
   const vendorLeftover = {};
-  vendorOrder.forEach(v => {
+
+  const packVendor = v => {
     const [xMin, xMax] = xBounds[v];
     const skuMap = {};
     vendorBoxes[v].forEach(b => { if (!skuMap[b.origId]) skuMap[b.origId] = []; skuMap[b.origId].push(b); });
@@ -2036,7 +2039,19 @@ function packEP(itemList, contSpec, contKey) {
       }
     });
     vendorLeftover[v] = vLeftover;
-  });
+  };
+
+  // Pack non-last vendors first
+  vendorOrder.slice(0, -1).forEach(v => packVendor(v));
+
+  // Update last vendor's zone start to actual end of placed boxes — eliminates inter-vendor gap
+  if (lastV && vendorOrder.length > 1) {
+    const actualEnd = allPlaced.length ? Math.max(...allPlaced.map(b => b.px + b.pl)) : 0;
+    xBounds[lastV] = [actualEnd, packEnd];
+  }
+
+  // Pack last vendor in its updated zone
+  if (lastV) packVendor(lastV);
 
   // --- Step 4: per-vendor final cleanup — fill remaining gaps ---
   vendorOrder.forEach(v => {
@@ -2230,9 +2245,9 @@ function drawFrontView() {
   // Door clearance zone (dynamic, based on actual packing end)
   const doorClearance2D = result.doorClearance ?? 0;
   if (doorClearance2D >= 2) {
-    const dcColor = doorClearance2D >= 10 ? 'rgba(0,200,0,0.15)' : doorClearance2D >= 5 ? 'rgba(255,180,0,0.15)' : 'rgba(255,50,50,0.15)';
-    const dcStroke = doorClearance2D >= 10 ? 'rgba(0,200,0,0.6)' : doorClearance2D >= 5 ? 'rgba(255,180,0,0.6)' : 'rgba(255,50,50,0.6)';
-    const dcTextColor = doorClearance2D >= 10 ? 'rgba(0,160,0,0.9)' : doorClearance2D >= 5 ? 'rgba(200,120,0,0.9)' : 'rgba(200,0,0,0.9)';
+    const dcColor = doorClearance2D >= 15 ? 'rgba(0,200,0,0.15)' : doorClearance2D >= 10 ? 'rgba(255,180,0,0.15)' : 'rgba(255,50,50,0.15)';
+    const dcStroke = doorClearance2D >= 15 ? 'rgba(0,200,0,0.6)' : doorClearance2D >= 10 ? 'rgba(255,180,0,0.6)' : 'rgba(255,50,50,0.6)';
+    const dcTextColor = doorClearance2D >= 15 ? 'rgba(0,160,0,0.9)' : doorClearance2D >= 10 ? 'rgba(200,120,0,0.9)' : 'rgba(200,0,0,0.9)';
     const dcW = doorClearance2D * scale;
     const dcX = PAD_L + (CL - doorClearance2D) * scale;
     ctx.fillStyle = dcColor;
@@ -2372,7 +2387,7 @@ function drawFrontView() {
   // Door clearance label in legend
   if (legendY + 36 < canvasH) legendY = Math.max(legendY, PAD_T + contH - 52);
   const dc2d = result.doorClearance ?? 0;
-  const dcLabelColor = dc2d >= 10 ? '#34C759' : dc2d >= 5 ? '#FF9500' : '#FF3B30';
+  const dcLabelColor = dc2d >= 15 ? '#34C759' : dc2d >= 10 ? '#FF9500' : '#FF3B30';
   ctx.font = 'bold 10px sans-serif';
   ctx.fillStyle = '#6E6E73';
   ctx.fillText('門口預留', legendX, legendY);
@@ -2467,8 +2482,8 @@ function renderReport() {
   if (!result) return;
   const { placed, unplaced, totalWt, usedVol, volRate, wtRate, doorClearance, contSpec, contKey } = result;
   const dc = doorClearance ?? 0;
-  const dcColor = dc >= 10 ? '#34C759' : dc >= 5 ? '#FF9500' : '#FF3B30';
-  const dcIcon = dc >= 10 ? '✅' : dc >= 5 ? '⚠️' : '🔴';
+  const dcColor = dc >= 15 ? '#34C759' : dc >= 10 ? '#FF9500' : '#FF3B30';
+  const dcIcon = dc >= 15 ? '✅' : dc >= 10 ? '⚠️' : '🔴';
 
   // Stats
   const statsGrid = document.getElementById('statsGrid');
@@ -2494,7 +2509,7 @@ function renderReport() {
   // Door clearance summary
   const dcWrap = document.getElementById('doorClearanceWrap');
   if (dcWrap) {
-    dcWrap.innerHTML = `<span style="color:${dcColor}">${dcIcon} 門口預留 ${dc.toFixed(0)} cm（建議 ≥ 10 cm）</span>`;
+    dcWrap.innerHTML = `<span style="color:${dcColor}">${dcIcon} 門口預留 ${dc.toFixed(0)} cm（建議 ≥ 15 cm）</span>`;
   }
 
   // Progress bar
@@ -2780,8 +2795,8 @@ function render3D() {
   // Door clearance zone (dynamic, based on actual packing end)
   const doorClearance3D = result.doorClearance ?? 0;
   if (doorClearance3D > 0.5) {
-    const dcColor3D = doorClearance3D >= 10 ? 0x00cc00 : doorClearance3D >= 5 ? 0xffaa00 : 0xff2222;
-    const dcEdgeColor3D = doorClearance3D >= 10 ? 0x00aa00 : doorClearance3D >= 5 ? 0xdd8800 : 0xff4444;
+    const dcColor3D = doorClearance3D >= 15 ? 0x00cc00 : doorClearance3D >= 10 ? 0xffaa00 : 0xff2222;
+    const dcEdgeColor3D = doorClearance3D >= 15 ? 0x00aa00 : doorClearance3D >= 10 ? 0xdd8800 : 0xff4444;
     const dcStartX = CL - doorClearance3D;
     const dcGeo = new THREE.BoxGeometry(doorClearance3D, CH, CW);
     const dcMat = new THREE.MeshBasicMaterial({ color: dcColor3D, transparent: true, opacity: 0.15, depthWrite: false });
