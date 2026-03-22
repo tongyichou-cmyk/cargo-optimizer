@@ -1900,6 +1900,8 @@ function packBruteForce(boxes, placedAll, totalWt, zoneWt, zoneL, maxZoneWt, CL,
 
 function packEP(itemList, contSpec, contKey) {
   const { l: CL, w: CW, h: CH, maxWt } = contSpec;
+  const DOOR_CLEARANCE = contSpec.doorClearance ?? 15; // cm reserved near doors
+  const effL = CL - DOOR_CLEARANCE;                    // effective packing length
   const zoneWt = [0, 0, 0];
   const zoneL = CL / 3;
   const maxZoneWt = maxWt * 0.6;
@@ -1953,12 +1955,12 @@ function packEP(itemList, contSpec, contKey) {
   const nonLastVol = vendorOrder.slice(0, -1).reduce((s, v) => s + vendorVol[v], 0);
   vendorOrder.forEach((v, i) => {
     if (i === vendorOrder.length - 1) {
-      xBounds[v] = [xCur, CL];
+      xBounds[v] = [xCur, effL];
     } else {
       const len = nonLastVol > 0
         ? Math.ceil(availableForNonLast * (vendorVol[v] / nonLastVol))
         : Math.ceil(CL * (vendorVol[v]/totalVol) * 1.05);
-      xBounds[v] = [xCur, Math.min(xCur + len, CL)];
+      xBounds[v] = [xCur, Math.min(xCur + len, effL)];
       xCur = xBounds[v][1];
     }
   });
@@ -1971,7 +1973,7 @@ function packEP(itemList, contSpec, contKey) {
         { x: b.px,        y: b.py + b.ph,  z: b.pz        },
         { x: b.px,        y: b.py,          z: b.pz + b.pw },
       ].forEach(ep => {
-        if (ep.x <= CL && ep.y <= CH && ep.z <= CW &&
+        if (ep.x <= effL && ep.y <= CH && ep.z <= CW &&
             !eps.some(e => Math.abs(e.x-ep.x)<0.1 && Math.abs(e.y-ep.y)<0.1 && Math.abs(e.z-ep.z)<0.1))
           eps.push(ep);
       });
@@ -1986,7 +1988,7 @@ function packEP(itemList, contSpec, contKey) {
   let totalWt = 0;
 
   if (noStackBoxes.length) {
-    const r = packEPRange(noStackBoxes, allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, 0, CL);
+    const r = packEPRange(noStackBoxes, allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, 0, effL);
     allPlaced = allPlaced.concat(r.placed);
     leftover = leftover.concat(r.unplaced);
     totalWt = r.totalWt;
@@ -2037,8 +2039,14 @@ function packEP(itemList, contSpec, contKey) {
     totalWt = r.totalWt;
   });
 
-  // Collect any remaining unplaced (vendor zones took priority; we don't mix zones)
-  leftover = leftover.concat(vendorOrder.flatMap(v => vendorLeftover[v]));
+  // --- Step 6: cross-zone overflow — place any remaining boxes anywhere in [0, effL] ---
+  const allVendorLeftover = vendorOrder.flatMap(v => vendorLeftover[v]);
+  if (allVendorLeftover.length) {
+    const r = packBruteForce(allVendorLeftover, allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, 0, effL);
+    allPlaced = allPlaced.concat(r.placed);
+    totalWt = r.totalWt;
+    leftover = leftover.concat(r.unplaced);
+  }
 
   const placed = allPlaced;
   const unplaced = leftover;
@@ -2204,6 +2212,29 @@ function drawFrontView() {
   ctx.strokeStyle = '#007AFF';
   ctx.lineWidth = 2.5;
   ctx.strokeRect(PAD_L, PAD_T, contW, contH);
+
+  // Door clearance zone (red hatched zone at door end)
+  const doorClear2D = contSpec.doorClearance ?? 15;
+  if (doorClear2D > 0) {
+    const dcW = doorClear2D * scale;
+    const dcX = PAD_L + (CL - doorClear2D) * scale;
+    ctx.fillStyle = 'rgba(255,50,50,0.10)';
+    ctx.fillRect(dcX, PAD_T, dcW, contH);
+    ctx.strokeStyle = 'rgba(255,50,50,0.5)';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(dcX, PAD_T, dcW, contH);
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,50,50,0.8)';
+    ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.save();
+    ctx.translate(dcX + dcW / 2, PAD_T + contH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText(`門邊預留 ${doorClear2D}cm`, 0, 0);
+    ctx.restore();
+  }
 
   // Floor line
   ctx.strokeStyle = '#444';
@@ -2689,6 +2720,21 @@ function render3D() {
   const contLine = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x007AFF, linewidth: 2 }));
   contLine.position.set(cx, cy, cz);
   scene.add(contLine);
+
+  // Door clearance zone (semi-transparent red region near door end)
+  const doorClear = contSpec.doorClearance ?? 15;
+  const effL3D = CL - doorClear;
+  if (doorClear > 0) {
+    const dcGeo = new THREE.BoxGeometry(doorClear, CH, CW);
+    const dcMat = new THREE.MeshBasicMaterial({ color: 0xff2222, transparent: true, opacity: 0.15, depthWrite: false });
+    const dcMesh = new THREE.Mesh(dcGeo, dcMat);
+    dcMesh.position.set(effL3D + doorClear / 2, cy, cz);
+    scene.add(dcMesh);
+    const dcEdges = new THREE.EdgesGeometry(dcGeo);
+    const dcLine = new THREE.LineSegments(dcEdges, new THREE.LineBasicMaterial({ color: 0xff4444, linewidth: 1 }));
+    dcLine.position.copy(dcMesh.position);
+    scene.add(dcLine);
+  }
 
   // Floor
   const floorGeo = new THREE.PlaneGeometry(CL, CW);
