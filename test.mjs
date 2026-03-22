@@ -125,7 +125,12 @@ function packEPRange(boxes, placedAll, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW
             if (getStackHeight(all, x, z, bl, bw, box) >= maxH) continue;
           }
         }
-        const score = x * 1e10 + y * 1e5 + z;
+        // Primary: x (fill front-to-back), secondary: y, tertiary: z.
+        // Tiebreaker: prefer rotation with more cross-section capacity to avoid
+        // picking a narrow rotation (e.g. bl=29) over a wider one (bl=50.5) near xMax.
+        const capZ = Math.floor(CW / bw);
+        const capY = Math.min(box.maxStack || 99, Math.floor(CH / bh));
+        const score = x * 1e10 + y * 1e5 + z - capZ * capY * 0.1;
         if (score < bestScore) { bestScore = score; best = { x, y, z, bl, bh, bw }; }
       }
     }
@@ -145,8 +150,9 @@ function packEPRange(boxes, placedAll, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW
   return { placed, unplaced, totalWt };
 }
 
-// Estimate minimum x-length a vendor's boxes need (using default rotation = first rotation,
-// which matches what the packing algorithm picks when scores are equal)
+// Estimate minimum x-length a vendor's boxes need.
+// Full columns use the first rotation (matches algorithm default).
+// The last partial column uses the shortest bl rotation that still fits all remaining boxes.
 function computeMinZone(boxes, CW, CH) {
   const skus = {};
   boxes.forEach(b => {
@@ -156,11 +162,23 @@ function computeMinZone(boxes, CW, CH) {
   });
   let total = 0;
   Object.values(skus).forEach(({ box, qty }) => {
-    const { bl, bh, bw } = getRotations(box)[0];  // first rotation matches algorithm default
-    const zSlots = Math.floor(CW / bw);
-    const yStacks = Math.min(box.maxStack || 99, Math.floor(CH / bh));
+    const rots = getRotations(box);
+    const { bl: bl0, bh: bh0, bw: bw0 } = rots[0];
+    const zSlots = Math.floor(CW / bw0);
+    const yStacks = Math.min(box.maxStack || 99, Math.floor(CH / bh0));
     if (!zSlots || !yStacks) return;
-    total += Math.ceil(qty / (zSlots * yStacks)) * bl;
+    const perCol = zSlots * yStacks;
+    const fullCols = Math.floor(qty / perCol);
+    const remaining = qty - fullCols * perCol;
+    if (!remaining) { total += fullCols * bl0; return; }
+    // Find shortest bl among all rotations that can fit `remaining` boxes in one column
+    let minPartialBl = bl0;
+    for (const { bl, bh, bw } of rots) {
+      const z2 = Math.floor(CW / bw);
+      const y2 = Math.min(box.maxStack || 99, Math.floor(CH / bh));
+      if (z2 * y2 >= remaining && bl < minPartialBl) minPartialBl = bl;
+    }
+    total += fullCols * bl0 + minPartialBl;
   });
   return total;
 }
@@ -245,14 +263,18 @@ function packEP(itemList, contSpec) {
   const totalVol = vendorOrder.reduce((s,v) => s+vendorVol[v], 0);
   const xBounds = {};
   let xCur = 0;
-  // Zone allocation: volume-proportional with 1.05 buffer for non-last vendors.
-  // Last vendor gets whatever remains up to CL. This keeps non-last zones compact
-  // so the last vendor's packing naturally ends before CL, leaving door clearance.
+  // Zone allocation: cap last vendor at packEnd = CL - TARGET_CLEARANCE (10cm).
+  // EP algorithm will stop placing when boxes would exceed packEnd → actual door clearance ≥ 10cm.
+  const TARGET_CLEARANCE = contSpec.targetDoorClearance ?? 10;
+  const packEnd = CL - TARGET_CLEARANCE;
+  const lastV = vendorOrder.length ? vendorOrder[vendorOrder.length-1] : null;
+  const lastVMinZone = lastV ? computeMinZone(vendorBoxes[lastV], CW, CH) : 0;
+  const maxNonLastEnd = Math.max(0, packEnd - lastVMinZone);
   vendorOrder.forEach((v, i) => {
-    if (i === vendorOrder.length-1) { xBounds[v] = [xCur, CL]; }
+    if (i === vendorOrder.length-1) { xBounds[v] = [xCur, packEnd]; }
     else {
       const len = Math.ceil(CL * (vendorVol[v]/totalVol) * 1.05);
-      xBounds[v] = [xCur, Math.min(xCur+len, CL)];
+      xBounds[v] = [xCur, Math.min(xCur+len, maxNonLastEnd, packEnd)];
       xCur = xBounds[v][1];
     }
   });
