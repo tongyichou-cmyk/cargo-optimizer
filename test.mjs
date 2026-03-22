@@ -145,6 +145,74 @@ function packEPRange(boxes, placedAll, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW
   return { placed, unplaced, totalWt };
 }
 
+// Estimate minimum x-length a vendor's boxes need (using default rotation = first rotation,
+// which matches what the packing algorithm picks when scores are equal)
+function computeMinZone(boxes, CW, CH) {
+  const skus = {};
+  boxes.forEach(b => {
+    const k = b.origId || b.id;
+    if (!skus[k]) skus[k] = { box: b, qty: 0 };
+    skus[k].qty++;
+  });
+  let total = 0;
+  Object.values(skus).forEach(({ box, qty }) => {
+    const { bl, bh, bw } = getRotations(box)[0];  // first rotation matches algorithm default
+    const zSlots = Math.floor(CW / bw);
+    const yStacks = Math.min(box.maxStack || 99, Math.floor(CH / bh));
+    if (!zSlots || !yStacks) return;
+    total += Math.ceil(qty / (zSlots * yStacks)) * bl;
+  });
+  return total;
+}
+
+// Brute-force placement: scan all x/y/z boundaries for valid positions.
+// Used as last-resort for stubborn leftovers that EP heuristic misses.
+function packBruteForce(boxes, placedAll, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, xMin, xMax) {
+  const placed = [], unplaced = [];
+  for (const box of boxes) {
+    const rotations = getRotations(box);
+    let best = null, bestScore = Infinity;
+    const all = placedAll.concat(placed);
+    // Candidate positions: all boundaries created by placed boxes
+    const xs = [...new Set([xMin, ...all.map(b => b.px), ...all.map(b => b.px+b.pl)])].filter(x => x >= xMin-0.001 && x <= xMax).sort((a,b)=>a-b);
+    const ys = [...new Set([0, ...all.map(b => b.py+b.ph)])].sort((a,b)=>a-b);
+    const zs = [...new Set([0, ...all.map(b => b.pz), ...all.map(b => b.pz+b.pw)])].filter(z => z >= 0 && z <= CW).sort((a,b)=>a-b);
+    for (const x of xs) {
+      for (const rot of rotations) {
+        const { bl, bh, bw } = rot;
+        if (x < xMin-0.001 || x + bl > xMax+0.001) continue;
+        for (const y of ys) {
+          if (y + bh > CH+0.001) continue;
+          for (const z of zs) {
+            if (z + bw > CW+0.001) continue;
+            if (totalWt + box.wt > maxWt) continue;
+            const zoneIdx = Math.min(2, Math.floor(x / zoneL));
+            if (zoneWt[zoneIdx] + box.wt > maxZoneWt) continue;
+            if (hasOverlap(all, x, y, z, bl, bh, bw)) continue;
+            if (y > 0.001 && !isSupported(all, x, y, z, bl, bw)) continue;
+            if (y > 0.001) {
+              const below = getBoxesBelow(all, x, y, z, bl, bw);
+              if (below.some(b => b.stack === 'no')) continue;
+              if (below.some(b => b.stack === 'yes' && b.maxStack !== undefined)) {
+                const maxH = Math.max(...below.filter(b => b.stack === 'yes').map(b => b.maxStack || 99));
+                if (getStackHeight(all, x, z, bl, bw, box) >= maxH) continue;
+              }
+            }
+            const score = x * 1e10 + y * 1e5 + z;
+            if (score < bestScore) { bestScore = score; best = { x, y, z, bl, bh, bw }; }
+          }
+        }
+      }
+    }
+    if (best) {
+      const zoneIdx = Math.min(2, Math.floor(best.x / zoneL));
+      zoneWt[zoneIdx] += box.wt; totalWt += box.wt;
+      placed.push({ ...box, px: best.x, py: best.y, pz: best.z, pl: best.bl, ph: best.bh, pw: best.bw });
+    } else { unplaced.push(box); }
+  }
+  return { placed, unplaced, totalWt };
+}
+
 function packEP(itemList, contSpec) {
   const { l: CL, w: CW, h: CH, maxWt } = contSpec;
   const zoneWt = [0, 0, 0], zoneL = CL / 3, maxZoneWt = maxWt * 0.6;
@@ -177,27 +245,20 @@ function packEP(itemList, contSpec) {
   const totalVol = vendorOrder.reduce((s,v) => s+vendorVol[v], 0);
   const xBounds = {};
   let xCur = 0;
+  // Reserve minimum zone for last vendor; give remainder to earlier vendors proportionally
+  const lastV = vendorOrder.length ? vendorOrder[vendorOrder.length - 1] : null;
+  const lastMinZone = lastV ? computeMinZone(vendorBoxes[lastV], CW, CH) : 0;
+  const availableForNonLast = Math.max(0, CL - lastMinZone);
+  const nonLastVol = vendorOrder.slice(0, -1).reduce((s, v) => s + vendorVol[v], 0);
   vendorOrder.forEach((v, i) => {
     if (i === vendorOrder.length-1) { xBounds[v] = [xCur, CL]; }
     else {
-      const len = Math.ceil(CL * (vendorVol[v]/totalVol) * 1.05);
+      const len = nonLastVol > 0
+        ? Math.ceil(availableForNonLast * (vendorVol[v] / nonLastVol))
+        : Math.ceil(CL * (vendorVol[v]/totalVol) * 1.05);
       xBounds[v] = [xCur, Math.min(xCur+len, CL)];
       xCur = xBounds[v][1];
     }
-  });
-
-  let allPlaced = [], leftover = [], totalWt = 0;
-  if (noStackBoxes.length) {
-    noStackBoxes.sort((a,b)=>(b.wt-a.wt)||((b.l*b.w*b.h)-(a.l*a.w*a.h)));
-    const r = packEPRange(noStackBoxes, allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, 0, CL);
-    allPlaced = allPlaced.concat(r.placed); leftover = leftover.concat(r.unplaced); totalWt = r.totalWt;
-  }
-
-  const vendorLeftover = {};
-  vendorOrder.forEach(v => {
-    const [xMin, xMax] = xBounds[v];
-    const r = packEPRange(vendorBoxes[v], allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, xMin, xMax);
-    allPlaced = allPlaced.concat(r.placed); vendorLeftover[v] = r.unplaced; totalWt = r.totalWt;
   });
 
   const mkEps = (placed) => {
@@ -213,11 +274,52 @@ function packEP(itemList, contSpec) {
     return eps;
   };
 
-  // Per-vendor cleanup: fill gaps within each vendor's zone
+  let allPlaced = [], leftover = [], totalWt = 0;
+  if (noStackBoxes.length) {
+    noStackBoxes.sort((a,b)=>(b.wt-a.wt)||((b.l*b.w*b.h)-(a.l*a.w*a.h)));
+    const r = packEPRange(noStackBoxes, allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, 0, CL);
+    allPlaced = allPlaced.concat(r.placed); leftover = leftover.concat(r.unplaced); totalWt = r.totalWt;
+  }
+
+  const vendorLeftover = {};
+  vendorOrder.forEach(v => {
+    const [xMin, xMax] = xBounds[v];
+    // Process SKUs in order; run mini-cleanup for each SKU before the next one runs
+    const skuMap = {};
+    vendorBoxes[v].forEach(b => { if (!skuMap[b.origId]) skuMap[b.origId] = []; skuMap[b.origId].push(b); });
+    const skuKeys = Object.keys(skuMap).sort((a, b) => {
+      const qa = skuMap[a].length, qb = skuMap[b].length;
+      if (qb !== qa) return qb - qa;
+      if (skuMap[b][0].h !== skuMap[a][0].h) return skuMap[b][0].h - skuMap[a][0].h;
+      return (skuMap[b][0].l*skuMap[b][0].w*skuMap[b][0].h) - (skuMap[a][0].l*skuMap[a][0].w*skuMap[a][0].h);
+    });
+    const vLeftover = [];
+    skuKeys.forEach(k => {
+      const r = packEPRange(skuMap[k], allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, xMin, xMax);
+      allPlaced = allPlaced.concat(r.placed); totalWt = r.totalWt;
+      // Mini-cleanup for this SKU before the next SKU can fill its gaps
+      if (r.unplaced.length) {
+        const r2 = packEPRange(r.unplaced, allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, xMin, xMax, mkEps(allPlaced));
+        allPlaced = allPlaced.concat(r2.placed); totalWt = r2.totalWt;
+        vLeftover.push(...r2.unplaced);
+      }
+    });
+    vendorLeftover[v] = vLeftover;
+  });
+
+  // Per-vendor final cleanup: fill any remaining gaps
   vendorOrder.forEach(v => {
     if (!vendorLeftover[v].length) return;
     const [xMin, xMax] = xBounds[v];
     const r = packEPRange(vendorLeftover[v], allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, xMin, xMax, mkEps(allPlaced));
+    allPlaced = allPlaced.concat(r.placed); vendorLeftover[v] = r.unplaced; totalWt = r.totalWt;
+  });
+
+  // Brute-force pass: last resort for stubborn leftovers (scan all boundary positions)
+  vendorOrder.forEach(v => {
+    if (!vendorLeftover[v].length) return;
+    const [xMin, xMax] = xBounds[v];
+    const r = packBruteForce(vendorLeftover[v], allPlaced, totalWt, zoneWt, zoneL, maxZoneWt, CL, CW, CH, maxWt, xMin, xMax);
     allPlaced = allPlaced.concat(r.placed); vendorLeftover[v] = r.unplaced; totalWt = r.totalWt;
   });
 
@@ -567,7 +669,7 @@ test('real data: all 729 cartons placed (or ≥97%)', () => {
   const total = realResult.placed.length + realResult.unplaced.length;
   assert.equal(total, 729, 'total should be 729');
   const rate = realResult.placed.length / 729;
-  assert.ok(rate >= 0.97, `placed rate ${(rate*100).toFixed(1)}% below 97% threshold`);
+  assert.ok(rate >= 1.0, `placed rate ${(rate*100).toFixed(1)}% below 100% threshold`);
   console.log(`     → placed ${realResult.placed.length}/729 (${(rate*100).toFixed(1)}%)  vol=${( realResult.volRate*100).toFixed(1)}%`);
 });
 
